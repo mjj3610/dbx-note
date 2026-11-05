@@ -6,7 +6,13 @@
   "name": "Note Studio",
   "description": "Local-first Markdown notes and quick records with AI assistance: file workspace, WYSIWYG editor, tags, full-text search and streaming chat.",
   "icon": "https://raw.githubusercontent.com/mjj3610/dbx-note/v0.4.0/assets/plugin.svg",
-  "tags": ["notes", "markdown", "editor", "local-first", "ai"],
+  "tags": [
+    "notes",
+    "markdown",
+    "editor",
+    "local-first",
+    "ai"
+  ],
   "permissions": [],
   "source": "https://github.com/mjj3610/dbx-note/tree/v0.4.0",
   "homepage": "https://github.com/mjj3610/dbx-note",
@@ -22,8 +28,8 @@
     {
       "target": "windows-x64",
       "url": "https://github.com/mjj3610/dbx-note/releases/download/v0.4.0/com.mjj3610.note-0.4.0-windows-x64.dbxp",
-      "sha256": "5bb315d1fa0a11448fb9380f6fdf354be3f781f91ca2b6bbe8eb0e848d380d74",
-      "size": 3717088
+      "sha256": "7b78db04c58266b5b68ed58625cc6c854a8d2dedd6dc8eedca90f96d3bf8a637",
+      "size": 3727076
     }
   ]
 }
