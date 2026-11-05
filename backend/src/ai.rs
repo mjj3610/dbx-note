@@ -57,12 +57,30 @@ fn model_config(params: &Value) -> (String, String, String, f64) {
 fn build_body(params: &Value, stream: bool) -> Value {
     let (_, _, model, temperature) = model_config(params);
     let messages = params.get("messages").cloned().unwrap_or(json!([]));
-    json!({
+    let mut body = json!({
         "model": model,
         "messages": messages,
         "temperature": temperature,
         "stream": stream,
-    })
+    });
+
+    // 多模型配置下每个模型可以有自己的 top_p / max_tokens。
+    // top_p 缺省或等于 1 时不下发（1 就是无偏置采样，发了反而可能被部分厂商拒），
+    // max_tokens 为 0 时不下发，交给服务端默认值。
+    let top_p = params.get("topP").and_then(Value::as_f64).unwrap_or(0.0);
+    if top_p > 0.0 && (top_p - 1.0).abs() > f64::EPSILON {
+        if let Some(object) = body.as_object_mut() {
+            object.insert("top_p".into(), json!(top_p));
+        }
+    }
+    let max_tokens = param_i64(params, "maxTokens", 0);
+    if max_tokens > 0 {
+        if let Some(object) = body.as_object_mut() {
+            object.insert("max_tokens".into(), json!(max_tokens));
+        }
+    }
+
+    body
 }
 
 /// 非流式对话：一次返回完整文本

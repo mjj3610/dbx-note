@@ -19,7 +19,6 @@ import {
   Palette,
   PenTool,
   Puzzle,
-  RefreshCw,
   ScanText,
   Settings as SettingsIcon,
   Sparkles,
@@ -29,18 +28,18 @@ import {
 import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
-import { Input, Label } from '@/components/ui/input'
+import { Label } from '@/components/ui/input'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { copyText } from '@/lib/bridge'
 import * as rpc from '@/lib/rpc'
-import { aiModels } from '@/lib/rpc'
-import { APP_HOMEPAGE, APP_VERSION, EDITOR_WIDTH_RANGE, FONT_SIZE_RANGE, TEMPERATURE_RANGE } from '@/lib/constants'
+import { APP_HOMEPAGE, APP_VERSION, EDITOR_WIDTH_RANGE, FONT_SIZE_RANGE } from '@/lib/constants'
 import { LOCALES, type Locale } from '@/lib/i18n'
 import { cn } from '@/lib/utils'
 import { useT } from '@/lib/useT'
 import { useSettingsStore, type ThemeMode } from '@/stores/settings'
 import { useUiStore, type SettingsTab } from '@/stores/ui'
 import { AudioSection } from './SettingsAudio'
+import { ModelsSection } from './SettingsModels'
 import { EditorSection } from './SettingsEditor'
 import { FileSection } from './SettingsFile'
 import { ImageHostingSection } from './SettingsImageHosting'
@@ -177,7 +176,7 @@ export function SettingsDialog() {
             {tab === 'shortcuts' ? <ShortcutsSection /> : null}
             {tab === 'imageMethod' ? <ImageMethodSection /> : null}
             {tab === 'audio' ? <AudioSection /> : null}
-            {tab === 'ai' ? <AiSection /> : null}
+            {tab === 'ai' ? <ModelsSection /> : null}
             {tab === 'webSearch' ? <WebSearchSection /> : null}
             {tab === 'rag' ? <RagSection /> : null}
             {tab === 'memories' ? <MemoriesSection /> : null}
@@ -309,123 +308,6 @@ function SettingField({
       </div>
       {children}
     </div>
-  )
-}
-
-/* ---------------- AI ---------------- */
-
-function AiSection() {
-  const t = useT()
-  const ai = useSettingsStore((state) => state.ai)
-  const patchAi = useSettingsStore((state) => state.patchAi)
-  const [testing, setTesting] = useState(false)
-  const [models, setModels] = useState<string[]>([])
-
-  const test = async () => {
-    setTesting(true)
-    try {
-      const result = await aiModels({ baseUrl: ai.baseUrl, apiKey: ai.apiKey, model: ai.model })
-      setModels(result.items)
-      if (result.items.length === 0) {
-        toast.warning(t('settings.ai.modelsEmpty'))
-      } else {
-        toast.success(t('settings.ai.testOk'))
-      }
-    } catch (error) {
-      toast.error(t('settings.ai.testFail', { message: error instanceof Error ? error.message : String(error) }))
-    } finally {
-      setTesting(false)
-    }
-  }
-
-  return (
-    <SettingPage title={t('settings.ai')} desc={t('settings.ai.desc')}>
-      <SettingSection>
-        <div className="space-y-1.5">
-          <Label>{t('settings.ai.baseUrl')}</Label>
-          <Input
-            value={ai.baseUrl}
-            onChange={(event) => patchAi({ baseUrl: event.target.value })}
-            placeholder="https://api.openai.com/v1"
-            aria-label={t('settings.ai.baseUrl')}
-          />
-          <p className="text-[11px] text-muted-foreground">{t('settings.ai.baseUrlHint')}</p>
-        </div>
-
-        <div className="space-y-1.5">
-          <Label>{t('settings.ai.apiKey')}</Label>
-          <Input
-            type="password"
-            value={ai.apiKey}
-            onChange={(event) => patchAi({ apiKey: event.target.value })}
-            placeholder="sk-..."
-            autoComplete="off"
-            aria-label={t('settings.ai.apiKey')}
-          />
-          <p className="text-[11px] text-muted-foreground">{t('settings.ai.apiKeyHint')}</p>
-        </div>
-
-        <div className="space-y-1.5">
-          <Label>{t('settings.ai.model')}</Label>
-          <div className="flex gap-2">
-            <Input
-              value={ai.model}
-              onChange={(event) => patchAi({ model: event.target.value })}
-              placeholder="gpt-4o-mini"
-              aria-label={t('settings.ai.model')}
-              list="dbx-note-models"
-            />
-            <datalist id="dbx-note-models">
-              {models.map((name) => (
-                <option key={name} value={name} />
-              ))}
-            </datalist>
-            <Button variant="outline" size="sm" onClick={() => void test()} disabled={testing} className="shrink-0">
-              {testing ? <Loader2 className="size-3.5 animate-spin" /> : <RefreshCw className="size-3.5" />}
-              {testing ? t('settings.ai.testing') : t('settings.ai.test')}
-            </Button>
-          </div>
-          {models.length > 0 ? (
-            <div className="flex flex-wrap gap-1 pt-1">
-              {models.slice(0, 12).map((name) => (
-                <button
-                  key={name}
-                  type="button"
-                  onClick={() => patchAi({ model: name })}
-                  className={cn(
-                    'rounded border px-1.5 py-0.5 text-[11px] transition-colors',
-                    ai.model === name
-                      ? 'border-primary/40 bg-primary/5 text-foreground'
-                      : 'border-border text-muted-foreground hover:bg-muted',
-                  )}
-                >
-                  {name}
-                </button>
-              ))}
-            </div>
-          ) : null}
-        </div>
-
-        <div className="space-y-1.5">
-          <Label>
-            {t('settings.ai.temperature')}
-            <span className="ml-2 text-xs font-normal text-muted-foreground">
-              {ai.temperature.toFixed(1)}
-            </span>
-          </Label>
-          <input
-            type="range"
-            aria-label={t('settings.ai.temperature')}
-            min={TEMPERATURE_RANGE.min}
-            max={TEMPERATURE_RANGE.max}
-            step={TEMPERATURE_RANGE.step}
-            value={ai.temperature}
-            onChange={(event) => patchAi({ temperature: Number(event.target.value) })}
-            className="w-52 accent-primary"
-          />
-        </div>
-      </SettingSection>
-    </SettingPage>
   )
 }
 

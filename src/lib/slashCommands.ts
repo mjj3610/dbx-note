@@ -42,6 +42,7 @@ import {
 } from 'lucide-react'
 
 import * as rpc from '@/lib/rpc'
+import { isModelReady, resolveModel, toRpcConfig } from '@/lib/aiConfig'
 import { mermaidTemplate } from '@/lib/mermaidNode'
 import { useSettingsStore } from '@/stores/settings'
 import { openBlockMathDialog } from '@/lib/editorBus'
@@ -354,8 +355,10 @@ export async function runSlashCommand(
 /** AI 命令：取上下文 → 流式生成 → 插入 */
 async function runAiCommand(id: string, editor: Editor, customPrompt?: string) {
   const settings = useSettingsStore.getState()
-  if (!settings.ai.baseUrl || !settings.ai.model) {
-    throw new Error('请先在设置 → 模型服务里配置地址与模型')
+  // 斜杠里的写作指令复用「对话」用途的模型
+  const model = resolveModel(settings.ai, { type: 'chat' })
+  if (!isModelReady(model)) {
+    throw new Error('请先在设置 → AI 模型里配置厂商与对话模型')
   }
   const zh = settings.locale.startsWith('zh')
   const noteContent = useNotesStore.getState().content || ''
@@ -391,10 +394,7 @@ async function runAiCommand(id: string, editor: Editor, customPrompt?: string) {
   ]
 
   const started = await rpc.aiStart({
-    baseUrl: settings.ai.baseUrl,
-    apiKey: settings.ai.apiKey,
-    model: settings.ai.model,
-    temperature: settings.ai.temperature,
+    ...toRpcConfig(model),
     messages: payload,
   })
 

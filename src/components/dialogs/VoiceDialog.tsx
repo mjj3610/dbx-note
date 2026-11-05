@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { insertToEditor } from '@/lib/editorBus'
 import * as rpc from '@/lib/rpc'
+import { resolveModelWithFallback } from '@/lib/aiConfig'
 import { cn } from '@/lib/utils'
 import { useT } from '@/lib/useT'
 import { useSettingsStore } from '@/stores/settings'
@@ -59,9 +60,11 @@ export function VoiceDialog() {
   }
 
   const transcribe = async (params: { base64?: string; mime?: string; name?: string }) => {
-    const baseUrl = voice.baseUrl.trim() || ai.baseUrl
-    const apiKey = voice.apiKey.trim() || ai.apiKey
-    const model = voice.model.trim() || 'whisper-1'
+    // 优先级：声音设置里的专用转写配置 → 「语音转写」用途的默认模型 → 内置 whisper-1
+    const sttModel = resolveModelWithFallback(ai, 'stt')
+    const baseUrl = voice.baseUrl.trim() || sttModel?.baseUrl || ''
+    const apiKey = voice.apiKey.trim() || sttModel?.apiKey || ''
+    const model = voice.model.trim() || sttModel?.modelName || 'whisper-1'
     if (!baseUrl) {
       toast.error(t('settings.ai.modelsEmpty'))
       return

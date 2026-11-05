@@ -8,6 +8,7 @@ import { create } from 'zustand'
 
 import * as rpc from '@/lib/rpc'
 import type { AiMessage, ChatItem, MessageItem } from '@/lib/rpc'
+import { isModelReady, resolveModel, toRpcConfig } from '@/lib/aiConfig'
 import { useSettingsStore } from './settings'
 import { useNotesStore } from './notes'
 import { baseName, localId } from '@/lib/utils'
@@ -106,7 +107,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
     if (!trimmed || get().streaming) return
 
     const settings = useSettingsStore.getState()
-    if (!settings.ai.baseUrl || !settings.ai.model) {
+    // 多模型：取「对话」用途解析出的模型，没配好就不发请求
+    const chatModel = resolveModel(settings.ai, { type: 'chat' })
+    if (!isModelReady(chatModel)) {
       set({ error: 'no-model' })
       return
     }
@@ -190,10 +193,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     // 一次流式往返：启动 → 轮询，返回累积文本
     const streamChat = async (messages: AiMessage[]): Promise<string> => {
       const started = await rpc.aiStart({
-        baseUrl: settings.ai.baseUrl,
-        apiKey: settings.ai.apiKey,
-        model: settings.ai.model,
-        temperature: settings.ai.temperature,
+        ...toRpcConfig(chatModel),
         messages,
       })
       set({ streamId: started.id })

@@ -88,6 +88,10 @@ export interface AiConfig {
   apiKey: string
   model: string
   temperature?: number
+  /** 采样偏置；缺省或 1 时服务端不下发 */
+  topP?: number
+  /** 0 或未配置时不下发 max_tokens */
+  maxTokens?: number
 }
 
 export interface StreamChunk {

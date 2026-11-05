@@ -11,6 +11,7 @@ import type { Node as PMNode } from '@tiptap/pm/model'
 import type { Editor } from '@tiptap/react'
 
 import * as rpc from '@/lib/rpc'
+import { isModelReady, resolveModel, toRpcConfig } from '@/lib/aiConfig'
 import { buildSelectionMessages, type SelectionAIAction } from '@/lib/selectionAI'
 import { useSettingsStore } from '@/stores/settings'
 
@@ -56,10 +57,11 @@ export const useSelectionAIStore = create<SelectionAIState>((set, get) => ({
 
   start: async (request) => {
     const settings = useSettingsStore.getState()
-    const config = settings.ai
+    // 选中文本改写复用「对话」用途的模型
+    const model = resolveModel(settings.ai, { type: 'chat' })
     get().cancel()
 
-    if (!config.model.trim()) {
+    if (!isModelReady(model)) {
       set({ request, output: '', streaming: false, error: 'no-model' })
       return
     }
@@ -67,10 +69,7 @@ export const useSelectionAIStore = create<SelectionAIState>((set, get) => ({
     set({ request, output: '', streaming: true, error: '' })
     try {
       const started = await rpc.aiStart({
-        baseUrl: config.baseUrl,
-        apiKey: config.apiKey,
-        model: config.model,
-        temperature: config.temperature,
+        ...toRpcConfig(model),
         messages: buildSelectionMessages(request.action, request.text, {
           zh: settings.locale.startsWith('zh'),
           language: request.language,

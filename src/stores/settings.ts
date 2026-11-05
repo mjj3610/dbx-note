@@ -9,14 +9,68 @@ import { create } from 'zustand'
 import type { Locale } from '@/lib/i18n'
 import { getSetting, setSetting, type WorkspaceInfo } from '@/lib/rpc'
 import { hostAppearance, hostLocale } from '@/lib/bridge'
+import { localId } from '@/lib/utils'
 
 export type ThemeMode = 'light' | 'dark' | 'system'
 
-export interface AiSettings {
+/**
+ * 模型用途。
+ *
+ * 与 NoteGen 的 `modelType` 对齐：一个厂商下可以同时配置对话、视觉、转写、嵌入等
+ * 不同用途的模型，各用途在「默认模型」里分别指定由谁执行。
+ */
+export type AiModelType = 'chat' | 'vision' | 'stt' | 'embedding' | 'tts'
+
+/** 单个模型配置：同一厂商下可以有多个，按用途区分 */
+export interface AiModelConfig {
+  /** 本地唯一 id（不是模型名，模型名允许重复） */
+  id: string
+  /** 模型名，原样下发到 OpenAI 兼容接口的 `model` 字段 */
+  name: string
+  modelType: AiModelType
+  temperature: number
+  topP: number
+  /** 是否流式；仅 chat 生效 */
+  enableStream: boolean
+  /** 0 表示不下发 max_tokens，用服务端默认 */
+  maxTokens: number
+  /** 0 表示未知 */
+  contextWindow: number
+  /** TTS 音色 / STT 语言提示，留空则不下发 */
+  voice: string
+}
+
+/** 厂商 = 一个 baseURL + 一组密钥 + 若干模型 */
+export interface AiProvider {
+  id: string
+  name: string
   baseUrl: string
   apiKey: string
-  model: string
-  temperature: number
+  models: AiModelConfig[]
+}
+
+/** 各用途默认使用哪个模型（存的是 AiModelConfig.id） */
+export interface AiModelDefaults {
+  chat: string
+  vision: string
+  stt: string
+  embedding: string
+  tts: string
+}
+
+export interface AiSettings {
+  /** 厂商列表，可增可删 */
+  providers: AiProvider[]
+  /** 用途 → 模型 id */
+  defaults: AiModelDefaults
+}
+
+/** 旧版单模型配置，只在迁移存量数据时出现，不再写入 */
+export interface LegacyAiSettings {
+  baseUrl?: string
+  apiKey?: string
+  model?: string
+  temperature?: number
 }
 
 /** 技能 = 一组可复用的提示词（NoteGen 的 skills） */
@@ -429,16 +483,127 @@ export const DEFAULT_TEMPLATES: PromptTemplate[] = [
   },
 ]
 
+/** 各用途的中文名，仅用于兜底展示；界面文案走 i18n */
+export const AI_MODEL_TYPES: AiModelType[] = ['chat', 'vision', 'stt', 'embedding', 'tts']
+
+export const EMPTY_MODEL_DEFAULTS: AiModelDefaults = {
+  chat: '',
+  vision: '',
+  stt: '',
+  embedding: '',
+  tts: '',
+}
+
+/** 新建模型的默认参数：温度沿用 NoteGen 的 0.7，topP 用 1（不下发偏置） */
+export function createModelConfig(name = '', modelType: AiModelType = 'chat'): AiModelConfig {
+  return {
+    id: localId(),
+    name,
+    modelType,
+    temperature: 0.7,
+    topP: 1,
+    enableStream: true,
+    maxTokens: 0,
+    contextWindow: 0,
+    voice: '',
+  }
+}
+
+export function createProvider(name = '', baseUrl = '', apiKey = ''): AiProvider {
+  return { id: localId(), name, baseUrl, apiKey, models: [] }
+}
+
+/** 未传 id / 缺字段时补齐，并保证同一次迁移里 id 不重复 */
+function normalizeModel(raw: Partial<AiModelConfig> | undefined, seen: Set<string>): AiModelConfig {
+  const base = createModelConfig()
+  let id = typeof raw?.id === 'string' && raw.id.trim() ? raw.id.trim() : base.id
+  while (seen.has(id)) id = localId()
+  seen.add(id)
+  return {
+    id,
+    name: typeof raw?.name === 'string' ? raw.name : '',
+    modelType: AI_MODEL_TYPES.includes(raw?.modelType as AiModelType)
+      ? (raw!.modelType as AiModelType)
+      : 'chat',
+    temperature: typeof raw?.temperature === 'number' ? raw.temperature : base.temperature,
+    topP: typeof raw?.topP === 'number' ? raw.topP : base.topP,
+    enableStream: raw?.enableStream !== false,
+    maxTokens: typeof raw?.maxTokens === 'number' ? raw.maxTokens : 0,
+    contextWindow: typeof raw?.contextWindow === 'number' ? raw.contextWindow : 0,
+    voice: typeof raw?.voice === 'string' ? raw.voice : '',
+  }
+}
+
+/**
+ * 把存量的单模型配置或多厂商配置归一成 `AiSettings`。
+ *
+ * 迁移规则：
+ * - 新结构（有 providers）→ 逐层补默认值，丢掉悬空的模型 id；
+ * - 旧结构（只有 baseUrl/apiKey/model）→ 包成一个厂商 + 一个对话模型，
+ *   这样老用户升级后不必重新填一遍密钥；
+ * - 两者都没有 → 空配置，首次使用引导用户添加厂商。
+ */
+export function migrateAiSettings(raw: unknown): AiSettings {
+  const source = (raw ?? {}) as Partial<AiSettings> & LegacyAiSettings
+  const seen = new Set<string>()
+  const providers: AiProvider[] = []
+
+  if (Array.isArray(source.providers) && source.providers.length > 0) {
+    for (const provider of source.providers) {
+      if (!provider || typeof provider !== 'object') continue
+      const models = Array.isArray(provider.models)
+        ? provider.models.map((model) => normalizeModel(model, seen))
+        : []
+      providers.push({
+        id: typeof provider.id === 'string' && provider.id.trim() ? provider.id.trim() : localId(),
+        name: typeof provider.name === 'string' ? provider.name : '',
+        baseUrl: typeof provider.baseUrl === 'string' ? provider.baseUrl : '',
+        apiKey: typeof provider.apiKey === 'string' ? provider.apiKey : '',
+        models,
+      })
+    }
+  } else if (source.baseUrl || source.apiKey || source.model) {
+    const provider = createProvider('默认厂商', source.baseUrl ?? '', source.apiKey ?? '')
+    if (source.model) {
+      const model = createModelConfig(source.model, 'chat')
+      if (typeof source.temperature === 'number') model.temperature = source.temperature
+      seen.add(model.id)
+      provider.models.push(model)
+    }
+    providers.push(provider)
+  }
+
+  // 默认值只在对应模型真实存在时保留，避免指向已删除的模型
+  const validIds = new Set(providers.flatMap((provider) => provider.models.map((model) => model.id)))
+  const defaults = source.defaults ?? EMPTY_MODEL_DEFAULTS
+  const pickFor = (type: AiModelType, candidate?: string): string => {
+    if (candidate && validIds.has(candidate)) return candidate
+    const fallback = providers
+      .flatMap((provider) => provider.models)
+      .find((model) => model.modelType === type)
+    return fallback?.id ?? ''
+  }
+
+  return {
+    providers,
+    defaults: {
+      chat: pickFor('chat', defaults.chat),
+      vision: pickFor('vision', defaults.vision),
+      stt: pickFor('stt', defaults.stt),
+      embedding: pickFor('embedding', defaults.embedding),
+      tts: pickFor('tts', defaults.tts),
+    },
+  }
+}
+
 const DEFAULT_SETTINGS: SettingsSnapshot = {
   theme: 'system',
   locale: 'zh-CN',
   fontSize: 16,
   editorWidth: 760,
   ai: {
-    baseUrl: 'https://api.openai.com/v1',
-    apiKey: '',
-    model: '',
-    temperature: 0.7,
+    providers: [],
+    defaults: { ...EMPTY_MODEL_DEFAULTS },
   },
   memories: [],
   skills: DEFAULT_SKILLS,
@@ -537,6 +702,18 @@ interface SettingsState extends SettingsSnapshot {
   /** 局部更新（自动持久化） */
   patch: (patch: Partial<SettingsSnapshot>) => void
   patchAi: (patch: Partial<AiSettings>) => void
+  /** 新增或整体替换一个厂商（按 id 判断） */
+  upsertProvider: (provider: AiProvider) => void
+  /** 删除厂商；其下模型若被默认值引用会被自动改派 */
+  removeProvider: (providerId: string) => void
+  /** 厂商字段局部更新 */
+  patchProvider: (providerId: string, patch: Partial<Omit<AiProvider, 'id' | 'models'>>) => void
+  /** 新增或整体替换某个厂商下的模型 */
+  upsertModel: (providerId: string, model: AiModelConfig) => void
+  /** 删除模型；若它是某用途的默认模型会被自动改派 */
+  removeModel: (providerId: string, modelId: string) => void
+  /** 指定某用途使用哪个模型 */
+  setDefaultModel: (type: AiModelType, modelId: string) => void
   /** 图床局部更新（provider 内部字段） */
   patchHosting: <K extends keyof ImageHostingSettings>(
     key: K,
@@ -571,7 +748,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         snapshot = {
           ...DEFAULT_SETTINGS,
           ...stored,
-          ai: { ...DEFAULT_SETTINGS.ai, ...(stored.ai ?? {}) },
+          ai: migrateAiSettings(stored.ai),
           memories: Array.isArray(stored.memories) ? stored.memories : [],
           image: { ...DEFAULT_SETTINGS.image, ...(stored.image ?? {}) },
           imageHosting: {
@@ -648,6 +825,67 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   patchAi: (patch) => {
     const ai = { ...get().ai, ...patch }
     set({ ai })
+    void get().persist()
+  },
+
+  upsertProvider: (provider) => {
+    const current = get().ai
+    const exists = current.providers.some((item) => item.id === provider.id)
+    const providers = exists
+      ? current.providers.map((item) => (item.id === provider.id ? provider : item))
+      : [...current.providers, provider]
+    // 走一遍迁移：新厂商的模型补默认字段，默认值指向仍然有效
+    set({ ai: migrateAiSettings({ ...current, providers }) })
+    void get().persist()
+  },
+
+  removeProvider: (providerId) => {
+    const current = get().ai
+    const providers = current.providers.filter((item) => item.id !== providerId)
+    // 迁移会把悬空的默认模型改派到同类模型，没有同类就清空
+    set({ ai: migrateAiSettings({ providers, defaults: current.defaults }) })
+    void get().persist()
+  },
+
+  patchProvider: (providerId, patch) => {
+    const current = get().ai
+    const providers = current.providers.map((item) =>
+      item.id === providerId ? { ...item, ...patch } : item,
+    )
+    set({ ai: { ...current, providers } })
+    void get().persist()
+  },
+
+  upsertModel: (providerId, model) => {
+    const current = get().ai
+    const providers = current.providers.map((provider) => {
+      if (provider.id !== providerId) return provider
+      const exists = provider.models.some((item) => item.id === model.id)
+      return {
+        ...provider,
+        models: exists
+          ? provider.models.map((item) => (item.id === model.id ? model : item))
+          : [...provider.models, model],
+      }
+    })
+    set({ ai: migrateAiSettings({ ...current, providers }) })
+    void get().persist()
+  },
+
+  removeModel: (providerId, modelId) => {
+    const current = get().ai
+    const providers = current.providers.map((provider) =>
+      provider.id === providerId
+        ? { ...provider, models: provider.models.filter((item) => item.id !== modelId) }
+        : provider,
+    )
+    set({ ai: migrateAiSettings({ providers, defaults: current.defaults }) })
+    void get().persist()
+  },
+
+  setDefaultModel: (type, modelId) => {
+    const current = get().ai
+    set({ ai: { ...current, defaults: { ...current.defaults, [type]: modelId } } })
     void get().persist()
   },
 

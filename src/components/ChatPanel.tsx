@@ -28,6 +28,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/menu'
 import { copyText } from '@/lib/bridge'
+import { isModelReady, useModelOptions, useResolvedModel } from '@/lib/aiConfig'
 import { insertToEditor } from '@/lib/editorBus'
 import { renderMarkdown } from '@/lib/markdown'
 import { cn, relativeTime } from '@/lib/utils'
@@ -46,6 +47,10 @@ export function ChatPanel() {
   const t = useT()
   const locale = useSettingsStore((state) => state.locale)
   const ai = useSettingsStore((state) => state.ai)
+  const setDefaultModel = useSettingsStore((state) => state.setDefaultModel)
+  // 多模型：顶部徽标展示「对话」用途当前解析到的模型，点击即可切换
+  const chatModel = useResolvedModel('chat')
+  const chatOptions = useModelOptions('chat')
   const openSettings = useUiStore((state) => state.openSettings)
 
   const chats = useChatStore((state) => state.chats)
@@ -81,7 +86,7 @@ export function ChatPanel() {
   useEffect(() => setWithKnowledge(knowledgeDefault), [knowledgeDefault])
   useEffect(() => setWithTools(toolsDefault), [toolsDefault])
 
-  const modelReady = Boolean(ai.baseUrl && ai.model)
+  const modelReady = isModelReady(chatModel) && chatOptions.length > 0
 
   // 新消息与流式增量都滚到底部
   useEffect(() => {
@@ -112,11 +117,40 @@ export function ChatPanel() {
         <div className="flex min-w-0 items-center gap-1.5">
           <Sparkles className="size-3.5 text-muted-foreground" />
           <span className="truncate text-sm font-medium">{t('chat.title')}</span>
-          {ai.model ? (
-            <span className="max-w-[120px] truncate rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
-              {ai.model}
-            </span>
-          ) : null}
+          {/* 模型切换器：多模型下直接在这里切换主对话模型，等同设置里的「对话」用途 */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                aria-label={t('chat.switchModel')}
+                className="max-w-[150px] truncate rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground transition-colors hover:text-foreground"
+              >
+                {chatModel?.modelName || t('chat.noModel')}
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="max-h-72 overflow-y-auto">
+              <DropdownMenuLabel>{t('chat.switchModel')}</DropdownMenuLabel>
+              {chatOptions.length === 0 ? (
+                <DropdownMenuItem disabled>{t('chat.noModel')}</DropdownMenuItem>
+              ) : (
+                chatOptions.map((option) => (
+                  <DropdownMenuItem
+                    key={option.value}
+                    onSelect={() => setDefaultModel('chat', option.value)}
+                    className="gap-2"
+                  >
+                    <Check
+                      className={cn(
+                        'size-3.5 shrink-0',
+                        ai.defaults.chat === option.value ? 'opacity-100' : 'opacity-0',
+                      )}
+                    />
+                    <span className="truncate">{option.label}</span>
+                  </DropdownMenuItem>
+                ))
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
 
         <div className="flex items-center gap-0.5">

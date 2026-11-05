@@ -10,6 +10,7 @@
  */
 import { translate } from '@/lib/i18n'
 import * as rpc from '@/lib/rpc'
+import { isModelReady, resolveModelWithFallback } from '@/lib/aiConfig'
 import { useSettingsStore } from '@/stores/settings'
 
 export type ImageRecognitionMethod = 'vlm' | 'ocr' | 'none'
@@ -47,17 +48,24 @@ function messageOf(error: unknown): string {
 }
 
 /**
- * 视觉模型配置：识别专用的 `ocr.*` 优先，留空回落到通用 AI 配置
+ * 视觉模型配置
  *
- * 返回 null 表示"没有可用的视觉通道"，此时直接走系统 OCR。
+ * 优先级：图片识别设置里的专用 `ocr.*` → 「图片识别」用途的默认模型。
+ * 返回 null 表示没有可用的视觉通道，此时直接走系统 OCR。
  */
 export function visionEndpoint(): { baseUrl: string; apiKey: string; model: string } | null {
   const { ocr, ai } = useSettingsStore.getState()
-  const baseUrl = ocr.baseUrl.trim() || ai.baseUrl
-  const apiKey = ocr.apiKey.trim() || ai.apiKey
-  const model = ocr.model.trim() || ai.model
-  if (!baseUrl || !model) return null
-  return { baseUrl, apiKey, model }
+  // 1) 识别专用的独立配置（用户可能想用便宜的小模型专门看图）
+  const ocrBaseUrl = ocr.baseUrl.trim()
+  const ocrModel = ocr.model.trim()
+  if (ocrBaseUrl && ocrModel) {
+    return { baseUrl: ocrBaseUrl, apiKey: ocr.apiKey, model: ocrModel }
+  }
+
+  // 2) 多模型配置里「图片识别」用途的默认模型；未配置时退化为对话模型
+  const resolved = resolveModelWithFallback(ai, 'vision')
+  if (!isModelReady(resolved)) return null
+  return { baseUrl: resolved.baseUrl, apiKey: resolved.apiKey, model: resolved.modelName }
 }
 
 /** 图片识别总开关 */

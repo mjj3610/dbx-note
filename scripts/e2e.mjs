@@ -105,6 +105,20 @@ page.on('response', (response) => {
 await page.goto('http://127.0.0.1:5196/', { waitUntil: 'networkidle' })
 await page.waitForTimeout(1500)
 
+/**
+ * 顶栏「设置」按钮。
+ * 设置弹窗内的导航项名字都含「设置」（记录设置 / 编辑器设置 / 画布设置 / 语音设置），
+ * 用子串匹配会命中多个元素；必须精确匹配才唯一。
+ */
+const settingsButton = () => page.getByRole('button', { name: '设置', exact: true })
+
+/** 关闭设置弹窗：焦点在原生 select 上时 Esc 会被它吃掉，先失焦再按 */
+async function closeSettings() {
+  await page.evaluate(() => (document.activeElement instanceof HTMLElement ? document.activeElement.blur() : undefined))
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(400)
+}
+
 // 已有文件应出现在树中
 check('工作区文件已加载', (await page.locator('text=周会纪要').count()) > 0)
 
@@ -237,16 +251,33 @@ await page.waitForTimeout(900)
 check('重命名后磁盘出现新文件', existsSync(join(WORKSPACE, '项目', '规划-2026.md')))
 
 // 配置 AI（通过设置界面）
-await page.getByRole('button', { name: '设置' }).click()
+await settingsButton().click()
 await page.waitForTimeout(400)
 await page.getByRole('button', { name: 'AI 模型' }).click()
 await page.waitForTimeout(300)
-await page.locator('input[placeholder="https://api.openai.com/v1"]').fill('http://127.0.0.1:5199/v1')
-await page.locator('input[placeholder="sk-..."]').fill('test-key')
-await page.locator('input[placeholder="gpt-4o-mini"]').fill('mock-note-model')
-await page.getByRole('button', { name: '测试连接' }).click()
-await page.waitForTimeout(1200)
-check('模型列表按钮可用', (await page.locator('text=mock-note-model').count()) > 0)
+// 多厂商多模型：先添加厂商，再填地址与密钥，拉取模型后点选加入列表
+// 数据目录跨轮次复用，历史轮次可能已留下厂商卡，因此所有操作都锁在「新加的那张卡」内。
+await page.getByRole('button', { name: '添加厂商' }).click()
+await page.waitForTimeout(200)
+const providerCard = page.locator('[data-provider-card]').last()
+await providerCard.locator('input[aria-label="服务地址"]').fill('http://127.0.0.1:5199/v1')
+await providerCard.locator('input[aria-label="API Key"]').fill('test-key')
+await providerCard.getByRole('button', { name: '测试连接' }).click()
+await page.waitForTimeout(1500)
+check(
+  '拉取到可选模型',
+  (await providerCard.locator('button', { hasText: 'mock-note-model' }).count()) > 0,
+)
+// 点选模型名加入该厂商的模型列表
+await providerCard.locator('button', { hasText: 'mock-note-model' }).first().click()
+await page.waitForTimeout(400)
+check('厂商卡片模型数变为 1', (await providerCard.locator('[data-model-row]').count()) === 1)
+// 默认模型：把「对话与写作」指向刚加入的模型
+const chatSelect = page.locator('select[aria-label="对话与写作"]')
+const chatOption = await chatSelect.locator('option', { hasText: 'mock-note-model' }).first().getAttribute('value')
+check('对话用途出现可选项', Boolean(chatOption))
+if (chatOption) await chatSelect.selectOption(chatOption)
+await page.waitForTimeout(300)
 await page.screenshot({ path: join(SHOTS, '08-settings-ai.png') })
 await page.keyboard.press('Escape')
 await page.waitForTimeout(500)
@@ -344,7 +375,7 @@ await page.waitForTimeout(900)
 check('确认后文件已从磁盘删除', !existsSync(join(WORKSPACE, target)), target)
 
 // 语言切换
-await page.getByRole('button', { name: '设置' }).click()
+await settingsButton().click()
 await page.waitForTimeout(400)
 await page.locator('select').selectOption('en')
 await page.waitForTimeout(500)
@@ -352,10 +383,10 @@ check('切换英文后界面更新', (await page.locator('text=Appearance').coun
 await page.screenshot({ path: join(SHOTS, '10-english.png') })
 await page.locator('select').selectOption('zh-CN')
 await page.waitForTimeout(400)
-await page.keyboard.press('Escape')
-
+await closeSettings()
+check('设置弹窗已关闭', (await page.getByRole('dialog').count()) === 0)
 // 目录选择器（设置 → 工作区 → 更换目录）
-await page.getByRole('button', { name: '设置' }).click()
+await settingsButton().click()
 await page.waitForTimeout(400)
 await page.getByRole('dialog').getByRole('button', { name: '文件管理' }).click()
 await page.waitForTimeout(300)
@@ -499,7 +530,7 @@ check(
 await page.screenshot({ path: join(SHOTS, '15-canvas.png') })
 
 // 小地图：开启后应画出视口框，点「适应画布内容」会改变缩放
-await page.getByRole('button', { name: '设置' }).click()
+await settingsButton().click()
 await page.waitForTimeout(700)
 await page.getByRole('dialog').getByRole('button', { name: '画布设置', exact: true }).click()
 await page.waitForTimeout(600)
@@ -1065,7 +1096,7 @@ check('源码往返后图表节点仍在', (await page.locator('.ProseMirror [da
 
 /* ---------- 云同步（Git） ---------- */
 
-await page.getByRole('button', { name: '设置' }).click()
+await settingsButton().click()
 await page.waitForTimeout(400)
 await page.getByRole('button', { name: '同步', exact: true }).click()
 await page.waitForTimeout(700)
@@ -1200,7 +1231,7 @@ await page.waitForTimeout(500)
 
 /* ---------- 文件管理设置 ---------- */
 
-await page.getByRole('button', { name: '设置' }).click()
+await settingsButton().click()
 await page.waitForTimeout(500)
 await page.getByRole('dialog').getByRole('button', { name: '文件管理' }).click()
 await page.waitForTimeout(500)
@@ -1224,7 +1255,7 @@ await page.waitForTimeout(400)
 
 /* ---------- 图片存储（图床） ---------- */
 
-await page.getByRole('button', { name: '设置' }).click()
+await settingsButton().click()
 await page.waitForTimeout(500)
 await page.getByRole('dialog').getByRole('button', { name: '图片存储' }).click()
 await page.waitForTimeout(600)
@@ -1290,7 +1321,7 @@ check('开启后编辑器显示统计', (await page.locator('[data-editor-stats]
 
 /* ---------- 快捷键 ---------- */
 
-await page.getByRole('button', { name: '设置' }).click()
+await settingsButton().click()
 await page.waitForTimeout(500)
 await page.getByRole('dialog').getByRole('button', { name: '快捷键' }).click()
 await page.waitForTimeout(500)
@@ -1534,7 +1565,7 @@ if (altShotOpened) {
   await page.keyboard.press('Escape')
   await page.waitForTimeout(400)
 }
-await page.getByRole('button', { name: '设置' }).click()
+await settingsButton().click()
 await page.waitForTimeout(500)
 await page.getByRole('dialog').getByRole('button', { name: '快捷键' }).click()
 await page.waitForTimeout(500)
@@ -1545,7 +1576,7 @@ await page.waitForTimeout(400)
 
 /* ---------- 设置 → 关于：Sidecar 日志入口 ---------- */
 
-await page.getByRole('button', { name: '设置' }).click()
+await settingsButton().click()
 await page.waitForTimeout(500)
 await page.getByRole('dialog').getByRole('button', { name: '关于' }).click()
 await page.waitForTimeout(700)
@@ -1684,7 +1715,7 @@ const hostingProvider = async () => {
   return hosting?.provider ?? ''
 }
 
-await page.getByRole('button', { name: '设置' }).click()
+await settingsButton().click()
 await page.waitForTimeout(600)
 await page.getByRole('dialog').getByRole('button', { name: '图片存储' }).click()
 await page.waitForTimeout(600)
@@ -1770,7 +1801,7 @@ check(
 )
 
 // 还原成本地存储，后面的用例仍然按工作区路径走
-await page.getByRole('button', { name: '设置' }).click()
+await settingsButton().click()
 await page.waitForTimeout(500)
 await page.getByRole('dialog').getByRole('button', { name: '图片存储' }).click()
 await page.waitForTimeout(500)
@@ -1787,7 +1818,7 @@ await page.waitForTimeout(500)
 
 /* ---------- 知识库 / 记忆 ---------- */
 
-await page.getByRole('button', { name: '设置' }).click()
+await settingsButton().click()
 await page.waitForTimeout(400)
 await page.getByRole('dialog').getByRole('button', { name: '知识库', exact: true }).click()
 await page.waitForTimeout(500)
@@ -1878,7 +1909,7 @@ await page.waitForTimeout(400)
 
 /* ---------- 本地 MCP 工具 ---------- */
 
-await page.getByRole('button', { name: '设置' }).click()
+await settingsButton().click()
 await page.waitForTimeout(500)
 // 对话面板也有「工具」开关，这里限定在设置弹窗内
 await page.getByRole('dialog').getByRole('button', { name: 'MCP', exact: true }).click()

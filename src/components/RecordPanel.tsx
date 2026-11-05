@@ -29,6 +29,7 @@ import { useSettingsStore } from '@/stores/settings'
 import { useUiStore } from '@/stores/ui'
 import { useNotesStore } from '@/stores/notes'
 import { aiChat } from '@/lib/rpc'
+import { isModelReady, resolveModel, toRpcConfig } from '@/lib/aiConfig'
 
 type RecordType = 'text' | 'link' | 'todo' | 'image'
 /** 新建记录时可选的类型（图片记录由截图工具产生，不在这里手填） */
@@ -117,6 +118,8 @@ export function RecordPanel() {
   const t = useT()
   const locale = useSettingsStore((state) => state.locale)
   const ai = useSettingsStore((state) => state.ai)
+  // 记录整理属于长文本写作，复用「对话」用途的模型
+  const chatModel = resolveModel(ai, { type: 'chat' })
   const openSettings = useUiStore((state) => state.openSettings)
   const setVoiceOpen = useUiStore((state) => state.setVoiceOpen)
 
@@ -194,7 +197,7 @@ export function RecordPanel() {
       toast.error(t('records.needSelection'))
       return
     }
-    if (!ai.baseUrl || !ai.model) {
+    if (!isModelReady(chatModel)) {
       openSettings('ai')
       return
     }
@@ -205,10 +208,7 @@ export function RecordPanel() {
       const prompt = buildRecordsPrompt(ordered)
 
       const response = await aiChat({
-        baseUrl: ai.baseUrl,
-        apiKey: ai.apiKey,
-        model: ai.model,
-        temperature: ai.temperature,
+        ...toRpcConfig(chatModel),
         messages: [
           {
             role: 'system',
