@@ -26,6 +26,21 @@
   而「提交改动」会把笔记提交进**上层仓库**；现在只有工作区本身就是仓库根才算已初始化。
 - `top_p` / `max_tokens` 按模型下发：`topP` 为 1、`maxTokens` 为 0 时完全不下发，避免被部分厂商拒绝。
 
+## Platform support
+
+This release ships one package per platform (native sidecars cannot be bundled into a single
+universal package):
+
+| Platform | Notes, editor, AI, sync, canvas | Screenshot / pin | Clipboard bitmap | Microphone | System OCR |
+| --- | --- | --- | --- | --- | --- |
+| Windows x64 | full | yes | yes | yes | yes (WinRT) |
+| macOS arm64 / x64 | full | not yet | not yet | not yet | not yet |
+| Linux x64 / arm64 | full | not yet | not yet | not yet | not yet |
+
+On macOS and Linux the Win32-backed modules compile to stubs that return a readable
+"not supported on this platform" error instead of failing to build. Image recognition still works
+there through a configured vision model; only the free system-OCR path is Windows-only.
+
 ## Upgrade notes
 
 - 旧版单模型配置（地址 / 密钥 / 模型名 / 温度）会自动迁移成「一家厂商 + 一个对话模型」并设为对话默认模型。
