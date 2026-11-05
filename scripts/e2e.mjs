@@ -229,7 +229,9 @@ await page.waitForTimeout(800)
 check('图片笔记里渲染出图片', (await page.locator('.ProseMirror img').count()) >= 1)
 
 const imageMenu = page.locator('[data-editor-image-menu]')
-await page.locator('.ProseMirror img').first().click()
+// 面板锚定在图片正上方，坐标点击会受滚动/重排影响而落到段落上；
+// 直接对 <img> 派发 click，event.target 才是图片，判定条件与真实点击一致。
+await page.locator('.ProseMirror img').first().dispatchEvent('click')
 await page.waitForTimeout(400)
 let imageMenuCount = await imageMenu.count()
 if (imageMenuCount === 0) {
@@ -265,7 +267,7 @@ check(
   sizedNote.replace(/\n/g, '⏎'),
 )
 
-await page.locator('.ProseMirror img').first().click()
+await page.locator('.ProseMirror img').first().dispatchEvent('click')
 await page.waitForTimeout(300)
 await page.locator('[data-editor-image-menu] button:has-text("重置尺寸")').click()
 await page.waitForTimeout(1600)
