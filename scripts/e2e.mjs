@@ -25,6 +25,7 @@ import { chromium } from 'playwright-core'
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join, resolve } from 'node:path'
+import { deflateSync } from 'node:zlib'
 
 const ROOT = resolve(import.meta.dirname, '..')
 const CHROMIUM = join(process.env.LOCALAPPDATA ?? '', 'ms-playwright', 'chromium-1140', 'chrome-win', 'chrome.exe')
@@ -63,6 +64,60 @@ function rmDirRobust(target) {
   }
 }
 
+/**
+ * 生成一张纯色 PNG。
+ *
+ * 之前这里用的是 1×1 的 base64 图，结果「点击图片弹出图片设置」这条用例有一半概率失败：
+ * Playwright 点击元素中心，1×1 的中心点经亚像素取整后有一半落在图片外，
+ * 事件目标是段落而不是 <img>，面板自然不弹。图必须要有真实点击面积。
+ */
+function makePng(width, height, [r, g, b]) {
+  const raw = Buffer.alloc((width * 3 + 1) * height)
+  for (let y = 0; y < height; y += 1) {
+    const rowStart = y * (width * 3 + 1)
+    raw[rowStart] = 0 // filter: none
+    for (let x = 0; x < width; x += 1) {
+      const p = rowStart + 1 + x * 3
+      raw[p] = r
+      raw[p + 1] = g
+      raw[p + 2] = b
+    }
+  }
+  const table = (() => {
+    const t = new Uint32Array(256)
+    for (let n = 0; n < 256; n += 1) {
+      let c = n
+      for (let k = 0; k < 8; k += 1) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1
+      t[n] = c >>> 0
+    }
+    return t
+  })()
+  const crc32 = (buf) => {
+    let c = 0xffffffff
+    for (const byte of buf) c = table[(c ^ byte) & 0xff] ^ (c >>> 8)
+    return (c ^ 0xffffffff) >>> 0
+  }
+  const chunk = (type, data) => {
+    const length = Buffer.alloc(4)
+    length.writeUInt32BE(data.length)
+    const body = Buffer.concat([Buffer.from(type, 'ascii'), data])
+    const crc = Buffer.alloc(4)
+    crc.writeUInt32BE(crc32(body))
+    return Buffer.concat([length, body, crc])
+  }
+  const ihdr = Buffer.alloc(13)
+  ihdr.writeUInt32BE(width, 0)
+  ihdr.writeUInt32BE(height, 4)
+  ihdr[8] = 8 // bit depth
+  ihdr[9] = 2 // color type: truecolor
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk('IHDR', ihdr),
+    chunk('IDAT', deflateSync(raw)),
+    chunk('IEND', Buffer.alloc(0)),
+  ])
+}
+
 /** 直接写文件，模拟已有工作区 */
 function seedWorkspace() {
   // 只清理 Markdown 文件，避免删除被宿主占用的目录
@@ -82,13 +137,7 @@ function seedWorkspace() {
   writeFileSync(join(WORKSPACE, '图片笔记.md'), '# 图片笔记\n\n![示意图](assets/示意图.png)\n')
   // 1x1 PNG：验证图片预览链路（Sidecar 读成 data URL 再交给 img）
   mkdirSync(join(WORKSPACE, 'assets'), { recursive: true })
-  writeFileSync(
-    join(WORKSPACE, 'assets', '示意图.png'),
-    Buffer.from(
-      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
-      'base64',
-    ),
-  )
+  writeFileSync(join(WORKSPACE, 'assets', '示意图.png'), makePng(160, 120, [0x2f, 0x6f, 0xd8]))
 }
 seedWorkspace()
 
@@ -182,7 +231,23 @@ check('图片笔记里渲染出图片', (await page.locator('.ProseMirror img').
 const imageMenu = page.locator('[data-editor-image-menu]')
 await page.locator('.ProseMirror img').first().click()
 await page.waitForTimeout(400)
-check('点击图片弹出「图片设置」', (await imageMenu.count()) === 1)
+let imageMenuCount = await imageMenu.count()
+if (imageMenuCount === 0) {
+  const diag = await page.evaluate(() => ({
+    editors: document.querySelectorAll('.ProseMirror').length,
+    imgs: [...document.querySelectorAll('.ProseMirror img')].map((img) => {
+      const rect = img.getBoundingClientRect()
+      return { top: Math.round(rect.top), left: Math.round(rect.left), w: Math.round(rect.width), h: Math.round(rect.height) }
+    }),
+    active: document.activeElement?.className?.toString().slice(0, 60) ?? null,
+    menus: document.querySelectorAll('[data-editor-image-menu]').length,
+  }))
+  console.error('  [诊断] 点击后 400ms 无面板:', JSON.stringify(diag))
+  await page.waitForTimeout(1200)
+  imageMenuCount = await imageMenu.count()
+  console.error('  [诊断] 再等 1.2s 后面板数:', imageMenuCount)
+}
+check('点击图片弹出「图片设置」', imageMenuCount === 1)
 check(
   '面板回填图片地址',
   (await page.locator('#image-src').inputValue()) === 'assets/示意图.png',
