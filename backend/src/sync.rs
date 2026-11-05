@@ -9,7 +9,7 @@
 //! - 没有 git 或不是仓库时返回结构化状态，不抛异常，前端据此提示如何初始化；
 //! - 认证沿用本机已配置的凭据（credential helper / SSH key），插件不存储任何 token。
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use rusqlite::{params as sql_params, OptionalExtension};
@@ -73,6 +73,29 @@ fn git_version() -> Option<String> {
 fn fail(detail: &str, fallback: &str) -> RpcError {
     let message = if detail.is_empty() { fallback } else { detail };
     RpcError::internal(message.to_string())
+}
+
+/// 判断 git 报出的仓库根是否就是工作区本身
+///
+/// git 在 Windows 上回的是 `D:/a/b` 这种正斜杠形式，盘符大小写也不稳定；
+/// 工作区根还可能是相对路径。因此先做字面归一比较，不等再各自 canonicalize 比一次。
+fn same_path(reported: &str, root: &Path) -> bool {
+    fn normalize(value: &str) -> String {
+        value
+            .replace('\\', "/")
+            .trim_start_matches("//?/")
+            .trim_end_matches('/')
+            .to_lowercase()
+    }
+    if normalize(reported) == normalize(&root.to_string_lossy()) {
+        return true;
+    }
+    match (std::fs::canonicalize(reported), std::fs::canonicalize(root)) {
+        (Ok(reported_abs), Ok(root_abs)) => {
+            normalize(&reported_abs.to_string_lossy()) == normalize(&root_abs.to_string_lossy())
+        }
+        _ => false,
+    }
 }
 
 /// 解析 `rev-list --left-right --count a...b` 的 "behind\tahead"
@@ -219,8 +242,14 @@ pub fn status(app: &App) -> RpcResult {
         return Ok(state);
     };
 
-    let (inside, _, _) = git(&root, &["rev-parse", "--is-inside-work-tree"]);
-    if !inside {
+    let (ok, inside, _) = git(&root, &["rev-parse", "--is-inside-work-tree"]);
+    if !ok || inside.trim() != "true" {
+        return Ok(state);
+    }
+    // 光看 `--is-inside-work-tree` 不够：工作区位于别的仓库子目录时它同样返回 true，
+    // 那样会把笔记提交进上层仓库（数据归属错误）。必须确认工作区自己就是仓库根。
+    let (has_top, toplevel, _) = git(&root, &["rev-parse", "--show-toplevel"]);
+    if !has_top || !same_path(&toplevel, &root) {
         return Ok(state);
     }
     state["isRepo"] = Value::Bool(true);
