@@ -17,6 +17,60 @@
 
 ---
 
+## 最快路径：一条命令（推荐）
+
+整个过程已固化成 `store-submission/publish.mjs`，它会按顺序做完：建仓库 → 推源码与
+`v0.4.0` tag → 建 Release 并上传 3 个文件 → fork `t8y2/dbx-store` → 写入候选元数据 → 提 PR。
+
+先跑一次只读校验，确认本地材料和包字节都没问题（不需要 token）：
+
+```bash
+node store-submission/publish.mjs --dry-run
+```
+
+预期输出：
+
+```
+[1/6] 校验本地材料
+  ✓ 身份一致：com.mjj3610.note 0.4.0 mjj3610
+  ✓ windows-x64  com.mjj3610.note-0.4.0-windows-x64.dbxp  5bb315d1fa0a1144…  3717088 B
+  ✓ release-candidates.json 已就绪
+  ✓ 发布 tag：v0.4.0
+--dry-run：本地材料校验通过，未发起任何网络写操作。
+```
+
+校验通过后带上 token 真正提交：
+
+```bash
+GITHUB_TOKEN=你的token node store-submission/publish.mjs
+```
+
+Token 建议用 **fine-grained**，权限只要：
+
+| 权限 | 级别 | 用途 |
+| --- | --- | --- |
+| Contents | Read and write | 推源码、建 Release、传产物、写 fork 的候选文件 |
+| Workflows | Read and write | 仓库里有 `.github/workflows/plugin-release.yml`，缺这项推送会被拒 |
+| Administration | Read and write | 仅首次允许脚本自动建仓库；你已在网页建好则可以不给 |
+
+脚本的特性：
+
+- token 只从环境变量读，**不写进 `.git/config`、不落盘**；推送用一次性 URL 参数
+- 可重复执行：仓库已存在就跳过、Release 已存在就复用、资产同名就跳过、PR 已存在就打印地址
+- 上传前先核对本地 `.dbxp` 的 sha256 与 size 是否与候选钉住的值**逐字节一致**，
+  不一致直接中止，不会把错包传上去
+- 传完会真的 `HEAD` 一次候选 URL，确认商店 CI 能下载到
+
+只想做到「仓库 + Release」、PR 稍后自己提，加 `--skip-pr`。
+
+> 若 token 没有 Administration 权限、建仓库被拒，先在
+> https://github.com/new 建一个**空的** public 仓库 `dbx-note`（不要勾 README），
+> 再重跑脚本即可 —— 其余步骤会自动接管。
+
+下面是从零手工操作的完整版本，脚本跑不通时按它逐条排查。
+
+---
+
 ## 第 1 步：把源码推到 GitHub
 
 商店要求「源码必须公开可审查」，`candidates/*.json` 里的 `source` 字段也指向这个仓库。
