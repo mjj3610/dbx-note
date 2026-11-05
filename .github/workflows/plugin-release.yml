@@ -1,87 +1,55 @@
 name: plugin-release
 
-# 产出可用于 DBX 商店提交的未签名候选包。
+# 发布未签名的商店候选包，并上传到对应的 GitHub Release。
 #
-# 触发方式只有手动 + tag：日常提交不跑，避免无关 PR 消耗构建额度。
-# 注意：v0.4.0 的首发包是在本地用 mingw 工具链构建后手工上传的，
-# 这个 workflow 是为后续版本准备的，首次运行请先本地验证一遍等价性。
+# 构建与合并逻辑复用官方工作流，不自己实现：
+# 它会在矩阵里每个 runner 各打一个 .dbxp，校验「包未签名 + 包内 manifest 身份跨平台一致
+# + artifact 元数据的 sha256/size 与包字节相符」，最后合并成 release-candidates.json 上传。
+#
+# 注意：只认 `release: published` 事件；建 draft Release 或事后在页面上编辑都不会触发。
 on:
+  release:
+    types: [published]
   workflow_dispatch:
     inputs:
-      tag:
-        description: '发布 tag（留空则用 v<manifest.version>）'
-        required: false
-  push:
-    tags:
-      - 'v*'
+      release-tag:
+        description: 已存在的 Release tag（例如 v0.4.0）
+        required: true
 
 permissions:
   contents: write
 
 jobs:
-  windows-x64:
-    # Sidecar 直接用 Win32 API 做截图 / 置顶 / 剪贴板，目前只有 Windows 实现，
-    # 所以矩阵暂时只有 windows-x64。要出其他平台需要先做跨平台抽象。
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
+  release:
+    uses: t8y2/dbx/.github/workflows/plugin-release-reusable.yml@main
+    with:
+      release-tag: ${{ github.event.release.tag_name || inputs.release-tag }}
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: npm
+      # 官方工作流只负责装 Node 和 Rust，不装 npm 依赖，所以这里自己 npm ci。
+      # Sidecar 在 CI 上用默认的 msvc 工具链构建（runner 自带 MSVC），
+      # 从而绕过 backend/rust-toolchain.toml 里为「本机无 MSVC」而固定的 gnu 工具链。
+      package-command: >-
+        npm ci &&
+        npm run build &&
+        cargo +stable build --release --manifest-path backend/Cargo.toml &&
+        node scripts/package.mjs
 
-      # backend/rust-toolchain.toml 固定了 stable-x86_64-pc-windows-gnu，
-      # 但 GNU target 的链接器 gcc.exe 由 MSYS2 提供，runner 默认不在 PATH 里。
-      - uses: msys2/setup-msys2@v2
-        with:
-          msystem: MINGW64
-          update: true
-          install: mingw-w64-x86_64-gcc
-          path-type: inherit
+      # scripts/package.mjs 的产物目录是 release/（官方默认是 dist/）
+      package-path: release/*.dbxp
+      metadata-path: release/*.artifact.json
 
-      - name: 安装 Rust 工具链
-        run: rustup toolchain install stable-x86_64-pc-windows-gnu --profile minimal
+      rust-toolchain: stable
+      go-version: '' # 本插件没有 Go 后端，跳过 Go 安装
 
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: backend
-
-      - run: npm ci
-
-      - name: 类型检查
-        run: npm run typecheck
-
-      - name: 构建前端
-        run: npm run build
-
-      - name: 构建 Sidecar
-        run: npm run backend
-
-      - name: 打包 .dbxp
-        run: node scripts/package.mjs --target windows-x64
-
-      - name: 汇总 release-candidates.json
-        run: node scripts/make-release-candidates.mjs --repo ${{ github.repository }} --tag ${{ github.event.inputs.tag || github.ref_name }}
-
-      - name: 上传构建产物
-        uses: actions/upload-artifact@v4
-        with:
-          name: dbxp-windows-x64
-          path: |
-            release/*.dbxp
-            release/*.artifact.json
-            release/release-candidates.json
-
-      - name: 附加到 GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v') || github.event.inputs.tag != ''
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
-          # 商店维护者签名后才会写回 plugins/<id>.json，
-          # 这里上传的永远是未签名候选包。
-          files: |
-            release/*.dbxp
-            release/*.artifact.json
-            release/release-candidates.json
-          fail_on_unmatched_files: true
+      # 当前只出 windows-x64：Sidecar 的截图（GDI BitBlt / 分层窗口）、置顶
+      # （SetWindowPos）、剪贴板（CF_DIB）、OCR（WinRT）与全局热键（RegisterHotKey）
+      # 都是直接的 Win32 调用，且 Cargo.toml 里 windows-sys 目前是无条件依赖，
+      # 在 linux/darwin 上根本无法编译。
+      #
+      # 补齐平台实现（条件编译 + 各平台原生实现）后，在这里加条目即可，其余不用改：
+      #   {"runner":"ubuntu-24.04","target":"linux-x64"},
+      #   {"runner":"ubuntu-24.04-arm","target":"linux-arm64"},
+      #   {"runner":"macos-15-intel","target":"darwin-x64"},
+      #   {"runner":"macos-15","target":"darwin-arm64"}
+      build-matrix: >-
+        {"include":[{"runner":"windows-2022","target":"windows-x64"}]}

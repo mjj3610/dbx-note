@@ -16,8 +16,10 @@ import { join, relative, resolve, sep } from 'node:path'
 
 const ROOT = resolve(import.meta.dirname, '..')
 const args = process.argv.slice(2)
+// 优先级：命令行 --target > 官方发布工作流注入的 DBX_PLUGIN_TARGET > 本机默认值。
+// CI 的每个 runner 都会带 DBX_PLUGIN_TARGET，这样同一个命令能在矩阵里复用。
 const targetIndex = args.indexOf('--target')
-const TARGET = targetIndex >= 0 ? args[targetIndex + 1] : 'windows-x64'
+const TARGET = targetIndex >= 0 ? args[targetIndex + 1] : process.env.DBX_PLUGIN_TARGET || 'windows-x64'
 
 const manifest = JSON.parse(readFileSync(join(ROOT, 'manifest.json'), 'utf8'))
 const stageDir = join(ROOT, '.tmp', 'stage')

@@ -1,16 +1,22 @@
 # 依赖与构建产物
-node_modules/
-ui/
-release/
-backend/target/
+# 注意：必须带前导斜杠做根锚定。不锚定的 `ui/` 会连带忽略 src/components/ui/，
+# 导致组件没入库、本地测试全绿而 CI 全新 checkout 后 vite build 报
+# `Could not resolve "./components/ui/tooltip"`。
+/node_modules/
+/ui/
+/dist/
+/release/
+/bin/
+/fixtures/
+/backend/target/
 
 # 本地开发数据与临时文件
-.tmp/
-.dbx-dev/
-.tmp-vite.log
-.tmp-devhost*.log
-.tmp-*.log
-.tmpdata/
+/.tmp/
+/.dbx-dev/
+/.tmp-vite.log
+/.tmp-devhost*.log
+/.tmp-*.log
+/.tmpdata/
 
 # 编辑器与系统
 .vscode/
@@ -23,9 +29,9 @@ Thumbs.db
 .env.*
 
 # 自动化产物与录屏（README 用图已移到 docs/images/）
-screenshots/
-video*.mp4
+/screenshots/
 *.mp4
+video*.mp4
 
 # 工作区笔记与 AI 协作记录（不随插件源码发布）
-.workbuddy/
+/.workbuddy/
