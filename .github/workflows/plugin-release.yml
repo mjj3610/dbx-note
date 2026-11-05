@@ -1,0 +1,87 @@
+name: plugin-release
+
+# 产出可用于 DBX 商店提交的未签名候选包。
+#
+# 触发方式只有手动 + tag：日常提交不跑，避免无关 PR 消耗构建额度。
+# 注意：v0.4.0 的首发包是在本地用 mingw 工具链构建后手工上传的，
+# 这个 workflow 是为后续版本准备的，首次运行请先本地验证一遍等价性。
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '发布 tag（留空则用 v<manifest.version>）'
+        required: false
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  windows-x64:
+    # Sidecar 直接用 Win32 API 做截图 / 置顶 / 剪贴板，目前只有 Windows 实现，
+    # 所以矩阵暂时只有 windows-x64。要出其他平台需要先做跨平台抽象。
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      # backend/rust-toolchain.toml 固定了 stable-x86_64-pc-windows-gnu，
+      # 但 GNU target 的链接器 gcc.exe 由 MSYS2 提供，runner 默认不在 PATH 里。
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: mingw-w64-x86_64-gcc
+          path-type: inherit
+
+      - name: 安装 Rust 工具链
+        run: rustup toolchain install stable-x86_64-pc-windows-gnu --profile minimal
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: backend
+
+      - run: npm ci
+
+      - name: 类型检查
+        run: npm run typecheck
+
+      - name: 构建前端
+        run: npm run build
+
+      - name: 构建 Sidecar
+        run: npm run backend
+
+      - name: 打包 .dbxp
+        run: node scripts/package.mjs --target windows-x64
+
+      - name: 汇总 release-candidates.json
+        run: node scripts/make-release-candidates.mjs --repo ${{ github.repository }} --tag ${{ github.event.inputs.tag || github.ref_name }}
+
+      - name: 上传构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: dbxp-windows-x64
+          path: |
+            release/*.dbxp
+            release/*.artifact.json
+            release/release-candidates.json
+
+      - name: 附加到 GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v') || github.event.inputs.tag != ''
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          # 商店维护者签名后才会写回 plugins/<id>.json，
+          # 这里上传的永远是未签名候选包。
+          files: |
+            release/*.dbxp
+            release/*.artifact.json
+            release/release-candidates.json
+          fail_on_unmatched_files: true
