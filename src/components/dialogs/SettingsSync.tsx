@@ -89,12 +89,17 @@ const PLATFORM_LIST: Array<{
   { value: 'selfHosted', labelKey: 'sync.platform.selfHosted', icon: ServerCog },
 ]
 
-/** 各托管平台的远端地址示例，切换平台时更新占位提示 */
+/**
+ * 各托管平台的远端地址示例，切换平台时更新占位提示。
+ *
+ * 统一给 HTTPS 形式：本插件的认证是「访问令牌 + HTTPS」，推送时把令牌临时拼进 URL，
+ * 提示成 SSH 形式会让用户以为要配 SSH key，反而走不通。
+ */
 const REMOTE_PLACEHOLDER: Record<string, string> = {
-  github: 'git@github.com:user/notes.git',
-  gitee: 'git@gitee.com:user/notes.git',
-  gitlab: 'git@gitlab.com:user/notes.git',
-  gitea: 'git@your-gitea.com:user/notes.git',
+  github: 'https://github.com/user/notes.git',
+  gitee: 'https://gitee.com/user/notes.git',
+  gitlab: 'https://gitlab.com/user/notes.git',
+  gitea: 'https://your-gitea.com/user/notes.git',
 }
 
 /** S3 预设（与图床模块共用一套文案） */
@@ -335,7 +340,7 @@ export function SyncSection() {
               <Input
                 value={remote}
                 onChange={(event) => setRemote(event.target.value)}
-                placeholder={REMOTE_PLACEHOLDER[options?.provider ?? 'github'] ?? 'git@github.com:user/notes.git'}
+                placeholder={REMOTE_PLACEHOLDER[options?.provider ?? 'github'] ?? 'https://github.com/user/notes.git'}
                 aria-label={t('sync.remoteUrl')}
               />
               <Button

@@ -13,7 +13,7 @@ on:
   workflow_dispatch:
     inputs:
       release-tag:
-        description: 已存在的 Release tag（例如 v0.4.0）
+        description: 已存在的 Release tag（例如 v0.5.0）
         required: true
 
 permissions:
@@ -26,8 +26,9 @@ jobs:
       release-tag: ${{ github.event.release.tag_name || inputs.release-tag }}
 
       # 官方工作流只负责装 Node 和 Rust，不装 npm 依赖，所以这里自己 npm ci。
-      # Sidecar 在 CI 上用默认的 msvc 工具链构建（runner 自带 MSVC），
-      # 从而绕过 backend/rust-toolchain.toml 里为「本机无 MSVC」而固定的 gnu 工具链。
+      # 显式 `+stable` 覆盖 backend/rust-toolchain.toml 里为「本机无 MSVC」固定的
+      # gnu 工具链：Windows runner 自带 MSVC 就用默认的 msvc 链路，macOS / Linux
+      # 用各自的原生工具链；scripts/package.mjs 按 process.platform 取二进制名。
       package-command: >-
         npm ci &&
         npm run build &&
@@ -41,15 +42,19 @@ jobs:
       rust-toolchain: stable
       go-version: '' # 本插件没有 Go 后端，跳过 Go 安装
 
-      # 当前只出 windows-x64：Sidecar 的截图（GDI BitBlt / 分层窗口）、置顶
-      # （SetWindowPos）、剪贴板（CF_DIB）、OCR（WinRT）与全局热键（RegisterHotKey）
-      # 都是直接的 Win32 调用，且 Cargo.toml 里 windows-sys 目前是无条件依赖，
-      # 在 linux/darwin 上根本无法编译。
+      # 五个平台各打一个包。Sidecar 里截图（GDI）、剪贴板（CF_DIB）、置顶窗口、
+      # 系统 OCR（WinRT）与全局热键都是直接的 Win32 调用，已通过条件编译收敛到
+      # backend/src/{native,ocr,screenshot,...}.rs 与对应的 *_stub.rs：
+      # Windows 编真实实现，macOS / Linux 编同名同签名的桩（调用时返回「本平台不支持」），
+      # 笔记、编辑器、AI、同步等主流程在非 Windows 上照常可用。
       #
-      # 补齐平台实现（条件编译 + 各平台原生实现）后，在这里加条目即可，其余不用改：
-      #   {"runner":"ubuntu-24.04","target":"linux-x64"},
-      #   {"runner":"ubuntu-24.04-arm","target":"linux-arm64"},
-      #   {"runner":"macos-15-intel","target":"darwin-x64"},
-      #   {"runner":"macos-15","target":"darwin-arm64"}
+      # 某个 runner 不可用时删掉对应条目即可，其余平台仍能出包；
+      # 但 Publish 需要所有 build 成功，不删项会整体失败。
       build-matrix: >-
-        {"include":[{"runner":"windows-2022","target":"windows-x64"}]}
+        {"include":[
+          {"runner":"windows-2022","target":"windows-x64"},
+          {"runner":"ubuntu-24.04","target":"linux-x64"},
+          {"runner":"ubuntu-24.04-arm","target":"linux-arm64"},
+          {"runner":"macos-15-intel","target":"darwin-x64"},
+          {"runner":"macos-15","target":"darwin-arm64"}
+        ]}

@@ -1189,7 +1189,7 @@ if ((await initButton.count()) > 0) {
 check('工作区已初始化为 Git 仓库', existsSync(join(WORKSPACE, '.git')))
 try {
   // 补一个本地身份，避免 commit 因缺少 user.name/email 失败（仓库已存在，--local 生效）
-  execFileSync('git', ['-C', WORKSPACE, 'config', 'user.email', 'e2e@dbx.local'])
+  execFileSync('git', ['-C', WORKSPACE, 'config', 'user.email', 'e2e@example.com'])
   execFileSync('git', ['-C', WORKSPACE, 'config', 'user.name', 'DBX E2E'])
 } catch {
   /* git 不可用时下面的断言会体现 */

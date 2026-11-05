@@ -18,11 +18,28 @@ mod files;
 mod imagehost;
 mod logs;
 mod mcp;
+// 截图 / 剪贴板位图 / 录音 / 系统 OCR 全部直接调 Win32（GDI、剪贴板、COM、WinRT），
+// 非 Windows 平台没有对应实现。这里做条件编译：Windows 编译真实模块，
+// 其他平台编译同名同签名的桩，协议层照常分发，调用方拿到的是可读错误而不是链接失败。
+#[cfg(windows)]
 mod native;
+#[cfg(windows)]
 mod ocr;
+#[cfg(windows)]
 mod pin;
+#[cfg(windows)]
 mod screenshot;
+#[cfg(windows)]
 mod screenshot_ink;
+#[cfg(not(windows))]
+#[path = "native_stub.rs"]
+mod native;
+#[cfg(not(windows))]
+#[path = "ocr_stub.rs"]
+mod ocr;
+#[cfg(not(windows))]
+#[path = "screenshot_stub.rs"]
+mod screenshot;
 mod storesync;
 mod sync;
 

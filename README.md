@@ -106,7 +106,24 @@ dbx-note/
 - Node.js 22+
 - Rust（Sidecar）：`npm run backend` 已固定 `stable-x86_64-pc-windows-gnu`；Windows 上若没有 MSVC Build Tools，需装 MinGW-w64（gcc）
 
-### 3.2 常用命令
+### 3.2 平台支持
+
+同一个插件按平台各打一个包（带原生 Sidecar 的插件出不了 universal 包，只能靠 CI 矩阵）：
+
+| 平台 | 包名 | 笔记 / 编辑器 / AI / 同步 | 截图 · 贴图 | 剪贴板位图 | 麦克风录音 | 系统 OCR |
+| --- | --- | --- | --- | --- | --- | --- |
+| Windows x64 | `…-windows-x64.dbxp` | 完整 | 可用 | 可用 | 可用 | 可用（WinRT） |
+| macOS arm64 | `…-darwin-arm64.dbxp` | 完整 | 不可用 | 不可用 | 不可用 | 不可用（可退回视觉模型识别） |
+| macOS x64 | `…-darwin-x64.dbxp` | 完整 | 同上 | 同上 | 同上 | 同上 |
+| Linux x64 | `…-linux-x64.dbxp` | 完整 | 同上 | 同上 | 同上 | 同上 |
+| Linux arm64 | `…-linux-arm64.dbxp` | 完整 | 同上 | 同上 | 同上 | 同上 |
+
+非 Windows 平台之所以是「不可用」而不是「编译不过」：截图 / 剪贴板位图 / 录音 / 系统 OCR
+这四个模块直接调 Win32（GDI、CF_DIB、COM、WinRT），已用 `#[cfg(windows)]` 收敛到
+`backend/src/{native,ocr,screenshot,pin,screenshot_ink}.rs`，其他平台编同名同签名的
+`*_stub.rs`，协议层照常分发、调用时返回「当前平台暂不支持该能力」。
+
+### 3.3 常用命令
 
 ```bash
 npm install
@@ -138,7 +155,7 @@ npm run pack               # 官方 CLI 打包（会强制用 msvc 重新编译 
 
 `npm run devhost -- --port 5196 --data .tmp/e2e-data --workspace <目录>` 可指定端口、数据目录与工作区。
 
-### 3.3 在 DBX 里调试
+### 3.4 在 DBX 里调试
 
 ```bash
 npm run build

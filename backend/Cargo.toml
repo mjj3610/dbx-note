@@ -23,6 +23,15 @@ sha1 = "0.10"
 sha2 = "0.10"
 hmac = "0.12"
 md5 = "0.7"
+
+# 系统 OCR 走 WinRT（Windows.Media.Ocr）：windows-sys 只是原始绑定，
+# WinRT 的泛型异步类型与 vector view 需要 `windows` 这个高层封装。
+#
+# 下面这些依赖只在 Windows 上编译：windows-sys / png / cpal 分别服务于
+# 截图与剪贴板位图（GDI）、PNG 编解码、麦克风录音，全部由 native.rs 使用；
+# 非 Windows 平台走 native_stub.rs / ocr_stub.rs / screenshot_stub.rs，
+# 不引入这些 crate，避免 Linux 上还要装 ALSA 头文件之类的系统依赖。
+[target.'cfg(target_os = "windows")'.dependencies]
 windows-sys = { version = "0.59", features = [
   "Win32_Foundation",
   "Win32_Graphics_Gdi",
@@ -39,10 +48,6 @@ windows-sys = { version = "0.59", features = [
 ] }
 png = "0.17"
 cpal = "0.15"
-
-# 系统 OCR 走 WinRT（Windows.Media.Ocr）：windows-sys 只是原始绑定，
-# WinRT 的泛型异步类型与 vector view 需要 `windows` 这个高层封装。
-[target.'cfg(target_os = "windows")'.dependencies]
 windows = { version = "0.58", features = [
   "Foundation",
   "Foundation_Collections",
