@@ -1,0 +1,4 @@
+# 本机未安装 MSVC Build Tools 时，默认 msvc 工具链缺少 link.exe。
+# 固定使用 GNU 工具链（需 MinGW-w64，rustup 会自动安装该工具链与 target）。
+[toolchain]
+channel = "stable-x86_64-pc-windows-gnu"

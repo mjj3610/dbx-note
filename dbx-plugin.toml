@@ -1,0 +1,20 @@
+# DBX 插件打包配置
+# schema_version 固定为 1；include 中的目录会按相对路径打进 .dbxp
+schema_version = 1
+
+# 原生 Sidecar（Rust）：工作区文件读写、SQLite 存储、AI 请求代理
+# language 支持 go / rust；directory 是源码目录，binary 是打包后的可执行文件名
+[backend]
+language = "rust"
+directory = "backend"
+binary = "backend"
+
+[package]
+# LICENSE / THIRD-PARTY-NOTICES.md / licenses/ 必须随包分发：
+# GPL-3.0 §4/§6 与 Apache-2.0 §4(a) 要求二进制分发时附带许可副本。
+include = ["assets", "ui", "LICENSE", "THIRD-PARTY-NOTICES.md", "licenses"]
+
+[dev]
+# 说明：Windows 下 CLI 以 \\?\ 前缀路径作为 cwd 调用构建命令，CMD 不支持该路径（EISDIR: 'G:'）。
+# 如需使用 dbx-plugin dev，请先手动 `npm run build`。
+# ui_build = ["npm", "run", "build"]

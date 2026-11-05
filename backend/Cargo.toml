@@ -1,0 +1,60 @@
+[package]
+name = "dbx-note-backend"
+version = "0.4.0"
+edition = "2021"
+description = "DBX 笔记插件原生 Sidecar：工作区文件读写、记录与对话存储、AI 代理"
+license = "GPL-3.0-or-later"
+
+[[bin]]
+name = "backend"
+path = "src/main.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rusqlite = { version = "0.32", features = ["bundled"] }
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls", "multipart"] }
+uuid = { version = "1", features = ["v4"] }
+chrono = "0.4"
+walkdir = "2"
+base64 = "0.22"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+sha1 = "0.10"
+sha2 = "0.10"
+hmac = "0.12"
+md5 = "0.7"
+windows-sys = { version = "0.59", features = [
+  "Win32_Foundation",
+  "Win32_Graphics_Gdi",
+  "Win32_UI_WindowsAndMessaging",
+  "Win32_UI_Controls_Dialogs",
+  "Win32_UI_Input_KeyboardAndMouse",
+  "Win32_UI_HiDpi",
+  "Win32_System_DataExchange",
+  "Win32_System_Com",
+  "Win32_System_Diagnostics_ToolHelp",
+  "Win32_System_Memory",
+  "Win32_System_LibraryLoader",
+  "Win32_System_Threading",
+] }
+png = "0.17"
+cpal = "0.15"
+
+# 系统 OCR 走 WinRT（Windows.Media.Ocr）：windows-sys 只是原始绑定，
+# WinRT 的泛型异步类型与 vector view 需要 `windows` 这个高层封装。
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.58", features = [
+  "Foundation",
+  "Foundation_Collections",
+  "Globalization",
+  "Graphics_Imaging",
+  "Media_Ocr",
+  "Storage",
+  "Storage_Streams",
+] }
+
+[profile.release]
+opt-level = "s"
+lto = true
+strip = true
+panic = "abort"

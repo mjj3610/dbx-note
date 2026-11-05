@@ -1,0 +1,72 @@
+import CodeMirror from '@uiw/react-codemirror'
+import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
+import { EditorView } from '@codemirror/view'
+
+/** 与设计令牌对齐的 CodeMirror 主题，跟随深浅色变量 */
+const sourceTheme = EditorView.theme({
+  '&': {
+    backgroundColor: 'transparent',
+    color: 'hsl(var(--foreground))',
+    fontSize: 'var(--dbx-note-source-size, 14px)',
+    height: '100%',
+  },
+  '.cm-content': {
+    fontFamily: 'var(--dbx-note-mono)',
+    padding: '24px 0 40vh',
+    caretColor: 'hsl(var(--primary))',
+  },
+  '.cm-gutters': {
+    backgroundColor: 'transparent',
+    color: 'hsl(var(--muted-foreground))',
+    border: 'none',
+  },
+  '.cm-activeLine': { backgroundColor: 'hsl(var(--muted) / 0.4)' },
+  '.cm-activeLineGutter': { backgroundColor: 'transparent' },
+  '.cm-selectionBackground, &.cm-focused .cm-selectionBackground': {
+    backgroundColor: 'hsl(var(--primary) / 0.14) !important',
+  },
+  '.cm-cursor': { borderLeftColor: 'hsl(var(--primary))' },
+  '.cm-scroller': { overflow: 'auto', lineHeight: '1.7' },
+})
+
+/**
+ * Markdown 源码模式
+ *
+ * 直接编辑原始文本，适合粘贴结构化内容或微调语法。
+ * 行号与自动换行跟随「设置 → 编辑器」里的开关。
+ */
+export function SourceEditor({
+  value,
+  onChange,
+  lineNumbers = true,
+  wrap = true,
+}: {
+  value: string
+  onChange: (next: string) => void
+  lineNumbers?: boolean
+  wrap?: boolean
+}) {
+  const extensions = [
+    markdown({ base: markdownLanguage }),
+    sourceTheme,
+    ...(wrap ? [EditorView.lineWrapping] : []),
+  ]
+
+  return (
+    <CodeMirror
+      value={value}
+      onChange={onChange}
+      extensions={extensions}
+      basicSetup={{
+        lineNumbers,
+        foldGutter: false,
+        highlightActiveLine: true,
+        highlightActiveLineGutter: false,
+        bracketMatching: true,
+        autocompletion: false,
+      }}
+      height="100%"
+      className="h-full"
+    />
+  )
+}
