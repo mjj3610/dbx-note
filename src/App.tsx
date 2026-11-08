@@ -21,7 +21,6 @@ import { SettingsDialog } from '@/components/dialogs/SettingsDialog'
 import { SyncConflictDialog } from '@/components/dialogs/SyncConflictDialog'
 import { Button } from '@/components/ui/button'
 import { TooltipProvider } from '@/components/ui/tooltip'
-import { pullOnOpen } from '@/lib/autoSync'
 import { awaitHostReady, isHosted, watchHostAppearance } from '@/lib/bridge'
 import * as rpc from '@/lib/rpc'
 import { captureMessage, pollPendingShot, startScreenshot } from '@/lib/screenshot'
@@ -135,8 +134,9 @@ export default function App() {
    * 回到应用时重新拉一次远端目录清单
    *
    * 参考项目的 `unified-sync-status` 在窗口重新可用时也会重跑 loadRemoteSyncFiles。
-   * 「刚启动」由 boot 里的 loadTree() 负责，这里覆盖「切走再回来」这一半场景；
-   * 当前打开的笔记顺带再做一次单文件比对，远端有新版本就刷新编辑器。
+   * 「刚启动」由 boot 里的 loadTree() 负责，这里覆盖「切走再回来」这一半场景。
+   * 当前笔记的正文更新由 refreshRemoteTree() 复用清单结果完成，不再额外发一次
+   * compare / fetch —— 否则每次 focus 都会多跑一个 git 进程。
    */
   useEffect(() => {
     if (status !== 'ready') return
@@ -144,17 +144,7 @@ export default function App() {
     const refresh = () => {
       if (Date.now() - lastRefresh < 5_000) return
       lastRefresh = Date.now()
-      const notes = useNotesStore.getState()
-      void notes.refreshRemoteTree()
-      const activePath = notes.activePath
-      if (!activePath) return
-      void pullOnOpen(activePath)
-        .then(async (result) => {
-          if (result?.updated) await useNotesStore.getState().reloadActive()
-        })
-        .catch(() => {
-          /* 离线或同步未配置时静默沿用本地内容 */
-        })
+      void useNotesStore.getState().refreshRemoteTree({ force: true })
     }
     const onVisible = () => {
       if (document.visibilityState === 'visible') refresh()

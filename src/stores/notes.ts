@@ -54,7 +54,7 @@ interface NotesState {
 
   loadTree: () => Promise<void>
   /** 只拉远端目录清单并合并进现有文件树，不重读本地磁盘 */
-  refreshRemoteTree: () => Promise<void>
+  refreshRemoteTree: (options?: { force?: boolean }) => Promise<void>
   open: (path: string) => Promise<void>
   /**
    * 重新读当前文件（手动拉取 / 解决冲突后调用）
@@ -83,6 +83,15 @@ interface NotesState {
 let saveTimer: number | undefined
 /** 远端清单请求代号：慢请求回来时不能覆盖更新一次的结果 */
 let remoteTreeGeneration = 0
+/**
+ * 两次清单刷新的最小间隔
+ *
+ * 每次刷新 Git 通道都要 `git fetch`，回到前台、新建文件、切标签都会触发；
+ * 不去重的话会在后台堆出一串 git 进程，把界面交互拖慢（e2e 里表现为
+ * 设置表单 / 按钮偶发渲染超时）。参考项目的 loadRemoteSyncFiles 也是
+ * 「进入文件页拉一次」，不是每次状态变化都拉。
+ */
+const REMOTE_TREE_MIN_INTERVAL = 15_000
 
 /** 标签记忆存在 Sidecar 的 settings 表（宿主沙箱没有 localStorage） */
 const TABS_SETTING_KEY = 'app.tabs'
@@ -168,7 +177,14 @@ export const useNotesStore = create<NotesState>((set, get) => ({
    * 与参考项目 `loadRemoteSyncFiles()` 对齐：只合并元信息，仅云端节点显示出来，
    * 点开时再下正文；离线 / 未配置同步时静默保留本地树，不打断使用。
    */
-  refreshRemoteTree: async () => {
+  refreshRemoteTree: async (options) => {
+    // 已有请求在飞：无论谁触发都跳过，绝不叠第二次 git fetch。
+    // 时间节流只作用于 loadTree 这类高频内部调用；用户切回前台（force）总能拉一次。
+    const now = Date.now()
+    const { remoteSyncing, remoteTreeAt } = get()
+    if (remoteSyncing) return
+    if (!options?.force && remoteTreeAt > 0 && now - remoteTreeAt < REMOTE_TREE_MIN_INTERVAL) return
+
     const generation = ++remoteTreeGeneration
     set({ remoteSyncing: true })
     try {
@@ -177,6 +193,15 @@ export const useNotesStore = create<NotesState>((set, get) => ({
       if (!snapshot.configured || snapshot.offline) return
       const tree = mergeRemoteTree(get().tree, snapshot.files)
       set({ tree, remoteTreeAt: Date.now() })
+
+      // 清单已经 fetch 过一次，这里直接复用结果拉当前这篇，不再发第二次
+      // compare / fetch。只对「本地未改、远端有新版本」生效，冲突仍交给弹窗。
+      const activePath = get().activePath
+      const active = snapshot.files.find((item) => item.path === activePath)
+      if (activePath && active?.status === 'updated' && active.localExists) {
+        await pullRemoteFileOnDemand(activePath)
+        await get().reloadActive()
+      }
     } catch {
       // 同步不可用不影响本地笔记，设置页里能看到具体原因
     } finally {
