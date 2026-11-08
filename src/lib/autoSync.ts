@@ -29,9 +29,13 @@ const CONFIG_TTL_MS = 60_000
 /** 拉取后抑制回推的窗口，与参考项目 `justPulledFile` 的 1 秒一致 */
 const JUST_PULLED_MS = 1_000
 
-type Mode = 'off' | 'store' | 'git'
+type Channel = 'off' | 'store' | 'git'
+type Mode = Channel
 
 interface AutoSyncConfig {
+  /** 当前配置的同步平台，只由 provider 决定，与自动同步间隔开关无关 */
+  channel: Channel
+  /** 自动推送是否启用：间隔设为「关闭」时才是 off */
   mode: Mode
   /** 自动同步间隔，0 表示关闭 */
   delayMs: number
@@ -46,7 +50,13 @@ export interface PullOnOpenResult {
   conflict?: { path: string; local: string; remote: string }
 }
 
-let config: AutoSyncConfig = { mode: 'off', delayMs: 0, pullOnOpen: false, checkedAt: 0 }
+let config: AutoSyncConfig = {
+  channel: 'off',
+  mode: 'off',
+  delayMs: 0,
+  pullOnOpen: false,
+  checkedAt: 0,
+}
 let timer: number | undefined
 let running = false
 let queued = false
@@ -67,21 +77,24 @@ async function resolveConfig(): Promise<AutoSyncConfig> {
   try {
     const [prefs, options] = await Promise.all([syncPrefs(), syncStoreOptions()])
     const provider = options.provider
-    const mode: Mode = STORE_PROVIDERS.includes(provider)
+    const channel: Channel = STORE_PROVIDERS.includes(provider)
       ? 'store'
       : GIT_PROVIDERS.includes(provider)
         ? 'git'
         : 'off'
     // 后端缺省与 NoteGen 一致，默认 5 秒
-    const delayMs = mode === 'off' ? 0 : toDelayMs(prefs.autoSync ?? '5')
+    const delayMs = channel === 'off' ? 0 : toDelayMs(prefs.autoSync ?? '5')
     config = {
-      mode: delayMs > 0 ? mode : 'off',
+      channel,
+      mode: delayMs > 0 ? channel : 'off',
       delayMs,
-      pullOnOpen: mode !== 'off' && Boolean(prefs.autoPullOnOpen),
+      // 参考项目里「自动同步间隔」和「打开时自动拉取」是两套独立设置：
+      // 间隔选「关闭」只关自动推送，不能连进入 / 打开时的拉取一起关掉。
+      pullOnOpen: channel !== 'off' && (prefs.autoPullOnOpen ?? true),
       checkedAt: Date.now(),
     }
   } catch {
-    config = { mode: 'off', delayMs: 0, pullOnOpen: false, checkedAt: Date.now() }
+    config = { channel: 'off', mode: 'off', delayMs: 0, pullOnOpen: false, checkedAt: Date.now() }
   }
   return config
 }
@@ -153,9 +166,9 @@ export function scheduleAutoSync(): void {
  */
 export async function pullOnOpen(path: string): Promise<PullOnOpenResult | null> {
   const next = await resolveConfig()
-  if (!next.pullOnOpen || next.mode === 'off') return null
+  if (!next.pullOnOpen || next.channel === 'off') return null
 
-  if (next.mode === 'store') {
+  if (next.channel === 'store') {
     const status = await syncStoreStatus()
     if (!status.ready || status.pendingDownload <= 0) return null
     await syncStorePull()
@@ -183,7 +196,26 @@ export async function pullOnOpen(path: string): Promise<PullOnOpenResult | null>
   return { updated: pulled.updated, content: pulled.binary ? undefined : pulled.content }
 }
 
+/**
+ * 点开「仅云端」节点时按需下载这一个文件
+ *
+ * 对齐参考项目 `pullMissingRemoteArticle()`：这一步不看 `autoPullOnOpen`，
+ * 因为节点本来就是远端清单里冒出来的，不拉下来根本打不开。
+ * Git 通道只写这一个文件；对象存储通道走它自己的清单差异整批下载。
+ */
+export async function pullRemoteFileOnDemand(path: string): Promise<void> {
+  const next = await resolveConfig()
+  if (next.channel === 'store') {
+    await syncStorePull({ overwrite: false })
+  } else if (next.channel === 'git') {
+    await syncPullFile(path)
+  } else {
+    throw new Error('尚未配置云同步，无法下载该云端文件')
+  }
+  markJustPulled()
+}
+
 /** 设置变更后让缓存立即失效 */
 export function invalidateAutoSyncConfig(): void {
-  config = { mode: 'off', delayMs: 0, pullOnOpen: false, checkedAt: 0 }
+  config = { channel: 'off', mode: 'off', delayMs: 0, pullOnOpen: false, checkedAt: 0 }
 }

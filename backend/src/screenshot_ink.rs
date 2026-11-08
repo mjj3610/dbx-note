@@ -156,6 +156,32 @@ enum Shape {
 }
 
 impl Shape {
+    /// 选区改大小时把形状坐标平移到新原点（画布坐标 = 屏幕坐标 - 选区左上角）
+    fn shift(&mut self, dx: i32, dy: i32) {
+        let move_point = |point: &mut (i32, i32)| {
+            point.0 += dx;
+            point.1 += dy;
+        };
+        match self {
+            Shape::Rect { a, b, .. }
+            | Shape::Ellipse { a, b, .. }
+            | Shape::Arrow { a, b, .. }
+            | Shape::Mosaic { a, b } => {
+                move_point(a);
+                move_point(b);
+            }
+            Shape::Pen { points, .. } => {
+                for point in points.iter_mut() {
+                    move_point(point);
+                }
+            }
+            Shape::Text { x, y, .. } => {
+                *x += dx;
+                *y += dy;
+            }
+        }
+    }
+
     fn bounds(&self) -> (i32, i32, i32, i32) {
         let span = |a: (i32, i32), b: (i32, i32)| {
             (
@@ -777,6 +803,54 @@ impl Ink {
         let x1 = (rect.0 + rect.2).min(self.width);
         let y1 = (rect.1 + rect.3).min(self.height);
         (x0, y0, (x1 - x0).max(0), (y1 - y0).max(0))
+    }
+
+    /// 选区被 8 向手柄改动后重建画布
+    ///
+    /// 参考项目里画布是 DOM 层、形状是相对选区的 SVG，改选区只要改 CSS；
+    /// 我们是预裁剪的像素画布，所以必须按新矩形重新裁底片，并把已有形状
+    /// 按新旧原点之差平移，否则标注会留在屏幕原处、新露出的区域也是黑的。
+    pub fn resize(
+        &mut self,
+        bright: &[u8],
+        screen_w: i32,
+        old_origin: (i32, i32),
+        new_sel: (i32, i32, i32, i32),
+    ) {
+        let (nx, ny, w, h) = new_sel;
+        if w <= 0 || h <= 0 || screen_w <= 0 {
+            return;
+        }
+        let (dx, dy) = (old_origin.0 - nx, old_origin.1 - ny);
+        let row_bytes = (w as usize).saturating_mul(4);
+        let mut base = vec![0u8; row_bytes.saturating_mul(h as usize)];
+        for row in 0..h {
+            let start = ((ny + row) as usize)
+                .saturating_mul(screen_w as usize)
+                .saturating_add(nx.max(0) as usize)
+                .saturating_mul(4);
+            if start + row_bytes <= bright.len() {
+                let offset = row as usize * row_bytes;
+                base[offset..offset + row_bytes].copy_from_slice(&bright[start..start + row_bytes]);
+            }
+        }
+
+        for shape in &mut self.shapes {
+            shape.shift(dx, dy);
+        }
+        if let Some(draft) = &mut self.draft {
+            draft.shift(dx, dy);
+        }
+        for shape in &mut self.redo {
+            shape.shift(dx, dy);
+        }
+        self.edit_at.0 += dx;
+        self.edit_at.1 += dy;
+        self.width = w;
+        self.height = h;
+        self.base = base;
+        self.canvas = self.base.clone();
+        self.redraw((0, 0, w, h));
     }
 
     /// 重画一块：底片 → 形状 → 草稿（文字由 GDI 在 paint 时叠加）

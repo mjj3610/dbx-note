@@ -688,7 +688,8 @@ mod window {
         GetForegroundWindow, GetMessageW, GetWindowRect, KillTimer, LoadCursorW,
         PeekMessageW, PostMessageW, PostQuitMessage, RegisterClassW, SetCursor, SetForegroundWindow,
         SetTimer, SetWindowPos, ShowWindow, TranslateMessage, CS_HREDRAW, CS_VREDRAW, HWND_TOPMOST,
-        IDC_ARROW, IDC_CROSS, MSG, PM_REMOVE, SWP_NOMOVE, SWP_NOZORDER, SWP_SHOWWINDOW, SW_SHOW,
+        IDC_ARROW, IDC_CROSS, IDC_SIZENESW, IDC_SIZENS, IDC_SIZENWSE, IDC_SIZEWE, MSG,
+        PM_REMOVE, SWP_NOMOVE, SWP_NOZORDER, SWP_SHOWWINDOW, SW_SHOW,
         WM_DESTROY, WM_ERASEBKGND, WM_KEYDOWN, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_PAINT,
         WM_RBUTTONDOWN, WM_SETCURSOR, WM_TIMER, WM_CTLCOLOREDIT, WNDCLASSW, WS_CLIPCHILDREN,
         WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
@@ -746,6 +747,158 @@ mod window {
         )
     }
 
+    /* ---------------- 选区 8 向缩放（对齐参考项目 screenshot/page.tsx） ----------------
+     *
+     * 参考项目在 webview 里放 8 个真实 DOM handle，CSS 给 nwse/nwse/ew/ns 双箭头，
+     * Pointer Events 用「起始矩形 + 累计 delta」算新矩形。这里是 Win32 原生 GDI
+     * 窗口，等价做法是：WM_SETCURSOR 命中手柄换系统光标、按下时记起始矩形、
+     * 移动时按累计 delta 改 rect、松手重建标注画布并重排工具栏。
+     */
+
+    /// 命中半径在 12px 手柄方块之外再放宽一点，方便触屏 / 高分屏
+    const HANDLE_HIT_EXTRA: i32 = 4;
+    /// 最小选区边长：参考项目是 2px，这里要留得下工具栏与 8 个手柄
+    const MIN_SELECTION: i32 = 16;
+
+    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+    enum ResizeHandle {
+        Nw,
+        N,
+        Ne,
+        E,
+        Se,
+        S,
+        Sw,
+        W,
+    }
+
+    impl ResizeHandle {
+        /// CSS 的 nwse/nesw/ew/ns-resize 对应的系统双箭头光标
+        fn cursor_id(self) -> *const u16 {
+            match self {
+                ResizeHandle::Nw | ResizeHandle::Se => IDC_SIZENWSE,
+                ResizeHandle::Ne | ResizeHandle::Sw => IDC_SIZENESW,
+                ResizeHandle::E | ResizeHandle::W => IDC_SIZEWE,
+                ResizeHandle::N | ResizeHandle::S => IDC_SIZENS,
+            }
+        }
+
+        /// 顺序与 `paint_selection()` 里画手柄的顺序一致
+        fn points(rect: (i32, i32, i32, i32)) -> [(ResizeHandle, i32, i32); 8] {
+            let (x, y, w, h) = rect;
+            [
+                (ResizeHandle::Nw, x, y),
+                (ResizeHandle::N, x + w / 2, y),
+                (ResizeHandle::Ne, x + w, y),
+                (ResizeHandle::E, x + w, y + h / 2),
+                (ResizeHandle::Se, x + w, y + h),
+                (ResizeHandle::S, x + w / 2, y + h),
+                (ResizeHandle::Sw, x, y + h),
+                (ResizeHandle::W, x, y + h / 2),
+            ]
+        }
+
+        /// 用「按下时的矩形 + 累计位移」算新矩形：不翻转、不越屏、不小于最小尺寸
+        fn apply(
+            self,
+            start: (i32, i32, i32, i32),
+            from: (i32, i32),
+            to: (i32, i32),
+            screen: (i32, i32),
+        ) -> (i32, i32, i32, i32) {
+            let (x, y, w, h) = start;
+            let (dx, dy) = (to.0 - from.0, to.1 - from.1);
+            let mut left = x;
+            let mut top = y;
+            let mut right = x + w;
+            let mut bottom = y + h;
+            if matches!(self, ResizeHandle::Nw | ResizeHandle::W | ResizeHandle::Sw) {
+                left = (left + dx).max(0).min(right - MIN_SELECTION);
+            }
+            if matches!(self, ResizeHandle::Ne | ResizeHandle::E | ResizeHandle::Se) {
+                right = (right + dx).min(screen.0).max(left + MIN_SELECTION);
+            }
+            if matches!(self, ResizeHandle::Nw | ResizeHandle::N | ResizeHandle::Ne) {
+                top = (top + dy).max(0).min(bottom - MIN_SELECTION);
+            }
+            if matches!(self, ResizeHandle::Sw | ResizeHandle::S | ResizeHandle::Se) {
+                bottom = (bottom + dy).min(screen.1).max(top + MIN_SELECTION);
+            }
+            (left, top, right - left, bottom - top)
+        }
+    }
+
+    /// 一次拖拽缩放的上下文
+    struct ResizeState {
+        handle: ResizeHandle,
+        start_rect: (i32, i32, i32, i32),
+        anchor: (i32, i32),
+    }
+
+    /// 鼠标是不是压在某个定位点上
+    ///
+    /// 保存 / 复制之后窗口就销毁了，所以「窗口还活着 + 有选区 + 没在框新选区」
+    /// 就是参考项目里「手柄始终可用」的那段时间。工具栏按钮优先，避免点不动。
+    fn hit_handle(state: &State, x: i32, y: i32) -> Option<ResizeHandle> {
+        // 只在「框已经拉好、工具栏已出现、还没保存 / 复制」这一阶段开放缩放；
+        // 正在拖新框、或自检预设的自动选区还没进入确认态时不抢鼠标。
+        if state.anchor.is_some() || state.ink.is_none() {
+            return None;
+        }
+        let rect = state.rect?;
+        if rect.2 < MIN_SELECTION || rect.3 < MIN_SELECTION {
+            return None;
+        }
+        if let Some(bar) = state.bar.as_ref() {
+            let (bx, by, bw, bh) = bar.rect;
+            if x >= bx && x < bx + bw && y >= by && y < by + bh {
+                return None;
+            }
+        }
+        let radius = ((12.0 * state.scale).round() as i32).max(8) / 2 + HANDLE_HIT_EXTRA;
+        ResizeHandle::points(rect)
+            .iter()
+            .find(|(_, hx, hy)| (x - hx).abs() <= radius && (y - hy).abs() <= radius)
+            .map(|(handle, _, _)| *handle)
+    }
+
+    /// 应用一次缩放位移；返回「旧矩形 → 新矩形」，没变化时返回 None
+    ///
+    /// 除了改 `rect`，还要把标注画布按新矩形重裁、把已有形状平移、把工具栏重排：
+    /// 这三件事漏掉任一件，缩放后都会出现「标注留在原地 / 工具栏悬空 / 裁剪错位」。
+    fn apply_resize(
+        state: &mut State,
+        x: i32,
+        y: i32,
+    ) -> Option<(Option<(i32, i32, i32, i32)>, (i32, i32, i32, i32))> {
+        let (handle, start_rect, anchor) = {
+            let job = state.resizing.as_ref()?;
+            (job.handle, job.start_rect, job.anchor)
+        };
+        let next = handle.apply(start_rect, anchor, (x, y), (state.width, state.height));
+        if state.rect == Some(next) {
+            return None;
+        }
+        let old = state.rect;
+        let origin = old
+            .map(|(ox, oy, _, _)| (ox, oy))
+            .unwrap_or((next.0, next.1));
+        state.rect = Some(next);
+        state.last_rect = Some(next);
+        if let Some(ink) = state.ink.as_mut() {
+            ink.resize(&state.bright, state.width, origin, next);
+        }
+        if let Some(ink) = state.ink.as_ref() {
+            state.bar = Some(ink_layout(
+                next,
+                (state.width, state.height),
+                state.scale,
+                ink.tool,
+            ));
+        }
+        Some((old, next))
+    }
+
     struct State {
         /// 整块虚拟桌面的 BGRA（自顶向下）
         bright: Vec<u8>,
@@ -756,6 +909,8 @@ mod window {
         origin_y: i32,
         anchor: Option<(i32, i32)>,
         cursor: Option<(i32, i32)>,
+        /// 正在拖某个定位点改选区大小；非空时隐藏手柄与工具栏（与参考项目一致）
+        resizing: Option<ResizeState>,
         rect: Option<(i32, i32, i32, i32)>,
         /// 上一帧的选区（脏矩形重绘：只刷新旧选区的并集，拖动才跟得上手）
         last_rect: Option<(i32, i32, i32, i32)>,
@@ -812,6 +967,7 @@ mod window {
                 origin_y,
                 anchor: None,
                 cursor: None,
+                resizing: None,
                 rect: auto,
                 last_rect: None,
                 cancelled: false,
@@ -1505,6 +1661,26 @@ mod window {
                 // 参考项目的光标规则：框选 / 标注时十字，指针工具在选区内是箭头，
                 // 压在工具栏上也是箭头。以前一直是系统默认箭头，看不出「可以框」。
                 let (x, y) = cursor_pos(hwnd);
+                // 定位点优先：8 个方向分别给 nwse / nesw / ew / ns 双箭头。
+                // 「工具模式」下同样优先命中 resize，与参考项目 HANDLES 的顺序一致。
+                let resize_cursor = STATE.with(|cell| {
+                    let borrow = cell.borrow();
+                    let Some(state) = borrow.as_ref() else {
+                        return None;
+                    };
+                    if let Some(resize) = state.resizing.as_ref() {
+                        // 拖拽中即使指针跑出手柄范围也要保持这个方向的箭头
+                        return Some(resize.handle.cursor_id());
+                    }
+                    hit_handle(state, x, y).map(|handle| handle.cursor_id())
+                });
+                if let Some(id) = resize_cursor {
+                    let cursor = LoadCursorW(std::ptr::null_mut(), id);
+                    if !cursor.is_null() {
+                        SetCursor(cursor);
+                    }
+                    return 1;
+                }
                 let arrow_only = STATE.with(|cell| {
                     let borrow = cell.borrow();
                     let Some(state) = borrow.as_ref() else {
@@ -1615,6 +1791,32 @@ mod window {
                     handle_action(hwnd, action);
                     return 0;
                 }
+                // 选区定位点优先于任何标注工具：压在 8 个点上就进入缩放拖拽。
+                // 保存 / 复制会销毁窗口，所以走到这里一定还在「未保存未复制」阶段。
+                let resize_hit = STATE.with(|cell| {
+                    let borrow = cell.borrow();
+                    let state = borrow.as_ref()?;
+                    let handle = hit_handle(state, x, y)?;
+                    Some((handle, state.rect?))
+                });
+                if let Some((handle, rect)) = resize_hit {
+                    // 有未提交的文字先落地，销毁输入框必须发生在 STATE 借用之外
+                    commit_pending_text(hwnd);
+                    STATE.with(|cell| {
+                        if let Some(state) = cell.borrow_mut().as_mut() {
+                            state.last_rect = Some(rect);
+                            state.resizing = Some(ResizeState {
+                                handle,
+                                start_rect: rect,
+                                anchor: (x, y),
+                            });
+                        }
+                    });
+                    SetCapture(hwnd);
+                    InvalidateRect(hwnd, std::ptr::null(), 0);
+                    UpdateWindow(hwnd);
+                    return 0;
+                }
                 if let Some((px, py, _origin)) = ink_point((x, y)) {
                     // 先把上一段没提交的文字落地（销毁输入框必须发生在借用之外）
                     commit_pending_text(hwnd);
@@ -1691,6 +1893,23 @@ mod window {
                     }
                 }
 
+                // 缩放拖拽优先：按「起始矩形 + 累计 delta」重算选区，
+                // 并同步重建标注画布（我们是像素画布，不像 webview 能纯靠 CSS 裁剪）。
+                let resized = STATE.with(|cell| {
+                    let mut borrow = cell.borrow_mut();
+                    let Some(state) = borrow.as_mut() else {
+                        return None;
+                    };
+                    apply_resize(state, x, y)
+                });
+                if let Some((old, next)) = resized {
+                    invalidate_change(hwnd, old, Some(next));
+                    unsafe {
+                        UpdateWindow(hwnd);
+                    }
+                    return 0;
+                }
+
                 // 标注阶段：画形状 / 刷新 hover
                 let phase = STATE.with(|cell| {
                     let borrow = cell.borrow();
@@ -1759,6 +1978,26 @@ mod window {
             WM_LBUTTONUP => {
                 let (x, y) = point(lparam);
                 ReleaseCapture();
+                // 缩放松手：补上最后一帧（up 的位置可能比最后一条 move 更远），
+                // 清掉拖拽态，整窗重画把手柄和工具栏放回来。
+                let resize_done = STATE.with(|cell| {
+                    let mut borrow = cell.borrow_mut();
+                    let Some(state) = borrow.as_mut() else {
+                        return false;
+                    };
+                    if state.resizing.is_none() {
+                        return false;
+                    }
+                    let _ = apply_resize(state, x, y);
+                    state.resizing = None;
+                    true
+                });
+                if resize_done {
+                    InvalidateRect(hwnd, std::ptr::null(), 0);
+                    UpdateWindow(hwnd);
+                    refresh_probe_annotate();
+                    return 0;
+                }
                 let annotating = STATE.with(|cell| {
                     cell.borrow().as_ref().map(|state| state.ink.is_some()).unwrap_or(false)
                 });
@@ -2172,6 +2411,8 @@ mod window {
                 let Some(state) = borrow.as_ref() else {
                     return;
                 };
+                // 拖拽缩放时隐藏 8 个手柄和工具栏，松手后重新渲染（与参考项目一致）
+                let resizing = state.resizing.is_some();
 
                 // 本次要画的外接矩形（已夹进窗口）
                 let area = ps.rcPaint;
@@ -2243,24 +2484,22 @@ mod window {
                     }
 
                     // 选框 + 8 个手柄 + 尺寸角标（与参考项目同一套样式）
-                    let marquee = STATE.with(|cell| {
-                        cell.borrow()
-                            .as_ref()
-                            .map(|state| state.anchor.is_some())
-                            .unwrap_or(false)
-                    });
-                    ink_paint_selection(back, (x, y, w, h), state.scale, !marquee);
+                    // 只在「拖新框」和「拖定位点」这两段时间藏起手柄
+                    let marquee = state.anchor.is_some();
+                    ink_paint_selection(back, (x, y, w, h), state.scale, !marquee && !resizing);
                 }
 
                 // 工具栏盖在压暗区上
-                if let (Some(bar), Some(ink)) = (state.bar.as_ref(), state.ink.as_ref()) {
-                    let (bx, by, bw, bh) = bar.rect;
-                    if area.right > bx
-                        && area.left < bx + bw
-                        && area.bottom > by
-                        && area.top < by + bh
-                    {
-                        ink_paint_bar(back, bar, ink, state.hot);
+                if !resizing {
+                    if let (Some(bar), Some(ink)) = (state.bar.as_ref(), state.ink.as_ref()) {
+                        let (bx, by, bw, bh) = bar.rect;
+                        if area.right > bx
+                            && area.left < bx + bw
+                            && area.bottom > by
+                            && area.top < by + bh
+                        {
+                            ink_paint_bar(back, bar, ink, state.hot);
+                        }
                     }
                 }
 
@@ -2405,5 +2644,62 @@ mod window {
             pixel[3] = 255;
         }
         out
+    }
+
+    #[cfg(test)]
+    mod resize_tests {
+        use super::{ResizeHandle as H, MIN_SELECTION};
+
+        const START: (i32, i32, i32, i32) = (100, 100, 200, 150);
+        const SCREEN: (i32, i32) = (1920, 1080);
+
+        #[test]
+        fn eight_handles_move_only_their_own_edges() {
+            // (方向, 按下点, 拖到点, 期望矩形)
+            let cases = [
+                (H::Nw, (100, 100), (140, 130), (140, 130, 160, 120)),
+                (H::N, (200, 100), (200, 60), (100, 60, 200, 190)),
+                (H::Ne, (300, 100), (340, 60), (100, 60, 240, 190)),
+                (H::E, (300, 175), (350, 175), (100, 100, 250, 150)),
+                (H::Se, (300, 250), (340, 280), (100, 100, 240, 180)),
+                (H::S, (200, 250), (200, 300), (100, 100, 200, 200)),
+                (H::Sw, (100, 250), (60, 290), (60, 100, 240, 190)),
+                (H::W, (100, 175), (40, 175), (40, 100, 260, 150)),
+            ];
+            for (handle, from, to, expected) in cases {
+                assert_eq!(handle.apply(START, from, to, SCREEN), expected, "{handle:?}");
+            }
+        }
+
+        #[test]
+        fn never_flips_shrinks_below_min_or_leaves_screen() {
+            // 右下角往左上拖过头：夹到最小尺寸，不翻到左上角去
+            let shrunk = H::Se.apply(START, (300, 250), (-500, -500), SCREEN);
+            assert_eq!((shrunk.0, shrunk.1), (100, 100));
+            assert!(shrunk.2 >= MIN_SELECTION && shrunk.3 >= MIN_SELECTION);
+
+            // 左上角往右下拖过头：同样不翻转
+            let moved = H::Nw.apply(START, (100, 100), (5000, 5000), SCREEN);
+            assert!(moved.2 >= MIN_SELECTION && moved.3 >= MIN_SELECTION);
+            assert_eq!((moved.0 + moved.2, moved.1 + moved.3), (300, 250));
+
+            // 右下角拖出屏幕：右下边界夹在虚拟桌面内
+            let clamped = H::Se.apply(START, (300, 250), (9000, 9000), SCREEN);
+            assert_eq!((clamped.0 + clamped.2, clamped.1 + clamped.3), SCREEN);
+        }
+
+        #[test]
+        fn eight_handle_points_cover_every_edge_and_corner() {
+            let points = H::points(START);
+            assert_eq!(points.len(), 8);
+            assert_eq!(points[0], (H::Nw, 100, 100));
+            assert_eq!(points[2], (H::Ne, 300, 100));
+            assert_eq!(points[4], (H::Se, 300, 250));
+            assert_eq!(points[6], (H::Sw, 100, 250));
+            assert_eq!(points[1], (H::N, 200, 100));
+            assert_eq!(points[3], (H::E, 300, 175));
+            assert_eq!(points[5], (H::S, 200, 250));
+            assert_eq!(points[7], (H::W, 100, 175));
+        }
     }
 }

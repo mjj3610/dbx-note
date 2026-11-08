@@ -707,6 +707,176 @@ pub fn record_base(app: &App, params: &Value) -> RpcResult {
     Ok(json!({ "updated": updated }))
 }
 
+/* ---------------- 远端文件树（对齐参考项目 loadRemoteSyncFiles） ----------------
+ *
+ * 参考项目进入文件页时并不下载任何笔记正文，而是拉一次「远端目录清单」，
+ * 把只存在于云端的节点以 `isLocale: false` 插进文件树，用户点开时才下载单文件。
+ * 我们之前只做了「打开已存在的本地笔记时逐文件比对」，所以远端新增的笔记
+ * 在进入时完全不可见 —— 这就是「本地进入时还是没有拉取」的根因。
+ *
+ * 这里只负责产出清单，合并与渲染在前端 `remoteTree.ts` / `notes.ts` 完成。
+ */
+
+/// 单次清单返回上限，避免超大仓库把 RPC 载荷撑爆
+const MAX_TREE_FILES: usize = 5_000;
+
+/// 隐藏文件、插件元数据不进文件树（与参考项目过滤 `.` 开头条目一致）
+pub(crate) fn tree_visible(rel: &str) -> bool {
+    const SKIP_DIRS: [&str; 9] = [
+        ".git", ".obsidian", ".dbx-note", ".trash", "node_modules", "target", "dist", ".next",
+        ".venv",
+    ];
+    rel.split('/')
+        .all(|part| !part.is_empty() && !part.starts_with('.') && !SKIP_DIRS.contains(&part))
+}
+
+/// 与本地 `fs/tree` 同一套白名单：只有笔记和图片才在文件树里出现
+pub(crate) fn tree_note_file(rel: &str) -> bool {
+    if !tree_visible(rel) {
+        return false;
+    }
+    let extension = rel
+        .rsplit('.')
+        .next()
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    matches!(
+        extension.as_str(),
+        "md" | "markdown" | "txt" | "mdx" | "png" | "jpg" | "jpeg" | "gif" | "webp" | "svg"
+    )
+}
+
+/// 三路比对给出清单里每个文件的状态
+///
+/// 只在「没有基线且本地存在」时才去查远端提交时间：有基线时一次 blob
+/// 比较就够了，逐文件跑 `git log` 会让进入文件树变成 N 次进程启动。
+fn classify(root: &PathBuf, state: &Value, rel: &str, remote_file: &RemoteFile) -> &'static str {
+    let base = base_of(state, rel);
+    let local = local_info(root, rel);
+    let remote_time = if base.is_none() && local.is_some() {
+        remote_mtime(root, rel)
+    } else {
+        0
+    };
+    match decide(Some(remote_file), base.as_ref(), local.as_ref(), remote_time).action {
+        "pull" if local.is_none() => "remoteOnly",
+        "pull" => "updated",
+        "push" => "localNewer",
+        "conflict" => "conflict",
+        _ => "synced",
+    }
+}
+
+/// `sync/remoteTree` 统一入口：按当前同步平台分派
+pub fn remote_tree(app: &App) -> RpcResult {
+    let options = sync::load_options(app);
+    let provider = options
+        .get("provider")
+        .and_then(Value::as_str)
+        .unwrap_or("github");
+    if ["s3", "webdav", "selfHosted"].contains(&provider) {
+        return crate::storesync::remote_tree(app);
+    }
+    list_remote(app)
+}
+
+/// Git 通道：fetch 一次后列出远端完整文件树
+pub fn list_remote(app: &App) -> RpcResult {
+    let root = sync::root_of(app);
+    let provider = sync::load_options(app)
+        .get("provider")
+        .and_then(Value::as_str)
+        .unwrap_or("github")
+        .to_string();
+    let (is_repo, _, _) = sync::git(&root, &["rev-parse", "--is-inside-work-tree"]);
+    let (has_remote, remote, _) = sync::git(&root, &["remote", "get-url", "origin"]);
+    if !is_repo || !has_remote || remote.trim().is_empty() {
+        return Ok(json!({
+            "configured": false,
+            "offline": false,
+            "provider": provider,
+            "files": [],
+            "message": "还没有配置 Git 远端仓库",
+        }));
+    }
+
+    let snapshot = match fetch_snapshot(app) {
+        Ok(value) => value,
+        Err(error) => {
+            return Ok(json!({
+                "configured": true,
+                "offline": true,
+                "provider": provider,
+                "files": [],
+                "message": error.message,
+            }))
+        }
+    };
+
+    let state = read_state(&root);
+    let mut files = Vec::new();
+    for (rel, remote_file) in &snapshot.files {
+        if !tree_note_file(rel) || files.len() >= MAX_TREE_FILES {
+            continue;
+        }
+        let local = local_info(&root, rel);
+        let status = classify(&root, &state, rel, remote_file);
+        files.push(json!({
+            "path": rel,
+            "sha": remote_file.blob,
+            "size": remote_file.size,
+            // 逐文件查远端提交时间会拉起 N 个 git 进程，文件树只需要体积做提示
+            "mtime": 0,
+            "status": status,
+            "localExists": local.is_some(),
+        }));
+    }
+
+    // 本地有、远端没有的文件也回传，界面可以标「待上传」
+    let mut local_only = Vec::new();
+    for rel in local_paths(&root) {
+        if tree_note_file(&rel) && !snapshot.files.contains_key(&rel) {
+            local_only.push(rel);
+        }
+    }
+
+    Ok(json!({
+        "configured": true,
+        "offline": false,
+        "provider": provider,
+        "channel": "git",
+        "head": snapshot.head,
+        "branch": snapshot.branch,
+        "files": files,
+        "localOnly": local_only,
+    }))
+}
+
+/// 列出工作区里的普通文件（排除隐藏目录与 .git）
+fn local_paths(root: &Path) -> Vec<String> {
+    fn walk(root: &Path, dir: &Path, out: &mut Vec<String>) {
+        if out.len() >= MAX_TREE_FILES {
+            return;
+        }
+        let Ok(entries) = std::fs::read_dir(dir) else { return };
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.starts_with('.') || name == "node_modules" {
+                continue;
+            }
+            let path = entry.path();
+            if path.is_dir() {
+                walk(root, &path, out);
+            } else if let Ok(rel) = path.strip_prefix(root) {
+                out.push(rel.to_string_lossy().replace('\\', "/"));
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(root, root, &mut out);
+    out
+}
+
 /// `sync/resolveConflict`：用户在弹窗里选了「采用远端 / 保留本地」
 pub fn resolve_conflict(app: &App, params: &Value) -> RpcResult {
     let side = param_str(params, "side");

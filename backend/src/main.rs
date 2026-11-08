@@ -66,7 +66,7 @@ use serde_json::{json, Value};
 
 /// 插件标识与版本，必须与 manifest.json 保持一致
 const PLUGIN_ID: &str = "com.mjj3610.note";
-pub(crate) const PLUGIN_VERSION: &str = "0.5.1";
+pub(crate) const PLUGIN_VERSION: &str = "0.5.2";
 /// 协议版本
 const PROTOCOL_VERSION: i64 = 1;
 
@@ -367,6 +367,8 @@ fn dispatch(app: &App, method: &str, params: Value) -> RpcResult {
         // 单文件同步：打开笔记时比对远端版本、按需拉取（与 NoteGen 的
         // compareFileVersions / pullFile / pullAllRemoteLibraryFiles 同构）
         "sync/fetch" => gitsync::fetch(app),
+        // 进入文件树时拉远端「目录清单」并合并仅云端节点（对应 loadRemoteSyncFiles）
+        "sync/remoteTree" => gitsync::remote_tree(app),
         "sync/compare" => gitsync::compare(app, &params),
         "sync/pullFile" => gitsync::pull_file(app, &params),
         "sync/pullAll" => gitsync::pull_all(app),

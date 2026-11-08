@@ -12,9 +12,10 @@ import { create } from 'zustand'
 import * as rpc from '@/lib/rpc'
 import type { TreeNode } from '@/lib/rpc'
 import { baseName, dirName } from '@/lib/utils'
+import { findTreeNode, mergeRemoteTree } from '@/lib/tree'
 import { useSettingsStore } from '@/stores/settings'
 import { useUiStore } from '@/stores/ui'
-import { pullOnOpen, scheduleAutoSync } from '@/lib/autoSync'
+import { pullOnOpen, pullRemoteFileOnDemand, scheduleAutoSync } from '@/lib/autoSync'
 
 export type SaveState = 'idle' | 'saving' | 'saved' | 'error'
 
@@ -34,6 +35,10 @@ export interface EditorTab {
 interface NotesState {
   tree: TreeNode[]
   loadingTree: boolean
+  /** 正在拉取远端目录清单（状态栏的同步指示） */
+  remoteSyncing: boolean
+  /** 最近一次成功合并远端清单的时间 */
+  remoteTreeAt: number
   expanded: string[]
   /** 打开的标签（按打开顺序） */
   tabs: EditorTab[]
@@ -48,6 +53,8 @@ interface NotesState {
   lastError: string | null
 
   loadTree: () => Promise<void>
+  /** 只拉远端目录清单并合并进现有文件树，不重读本地磁盘 */
+  refreshRemoteTree: () => Promise<void>
   open: (path: string) => Promise<void>
   /**
    * 重新读当前文件（手动拉取 / 解决冲突后调用）
@@ -74,6 +81,8 @@ interface NotesState {
 
 /** 自动保存防抖句柄 */
 let saveTimer: number | undefined
+/** 远端清单请求代号：慢请求回来时不能覆盖更新一次的结果 */
+let remoteTreeGeneration = 0
 
 /** 标签记忆存在 Sidecar 的 settings 表（宿主沙箱没有 localStorage） */
 const TABS_SETTING_KEY = 'app.tabs'
@@ -124,6 +133,8 @@ function updateTab(tabs: EditorTab[], path: string, patch: Partial<EditorTab>): 
 export const useNotesStore = create<NotesState>((set, get) => ({
   tree: [],
   loadingTree: false,
+  remoteSyncing: false,
+  remoteTreeAt: 0,
   expanded: [],
   tabs: [],
   activePath: '',
@@ -146,6 +157,31 @@ export const useNotesStore = create<NotesState>((set, get) => ({
         error: error instanceof Error ? error.message : String(error),
       })
     }
+    // 参考项目在 loadFileTree() 末尾无条件异步执行 loadRemoteSyncFiles()，
+    // 且不阻塞界面：这里同样只拉「目录清单」，不下载任何笔记正文。
+    void get().refreshRemoteTree()
+  },
+
+  /**
+   * 拉取远端目录清单并合并进文件树
+   *
+   * 与参考项目 `loadRemoteSyncFiles()` 对齐：只合并元信息，仅云端节点显示出来，
+   * 点开时再下正文；离线 / 未配置同步时静默保留本地树，不打断使用。
+   */
+  refreshRemoteTree: async () => {
+    const generation = ++remoteTreeGeneration
+    set({ remoteSyncing: true })
+    try {
+      const snapshot = await rpc.syncRemoteTree()
+      if (generation !== remoteTreeGeneration) return
+      if (!snapshot.configured || snapshot.offline) return
+      const tree = mergeRemoteTree(get().tree, snapshot.files)
+      set({ tree, remoteTreeAt: Date.now() })
+    } catch {
+      // 同步不可用不影响本地笔记，设置页里能看到具体原因
+    } finally {
+      if (generation === remoteTreeGeneration) set({ remoteSyncing: false })
+    }
   },
 
   open: async (path) => {
@@ -160,10 +196,18 @@ export const useNotesStore = create<NotesState>((set, get) => ({
       // 先比对远端、按需拉取，再读盘。
       // 顺序不能反：以前是「读盘 → 异步 pull」，拉完编辑器仍持有旧内容，
       // 用户一编辑保存就会把刚拉下来的版本覆盖掉（等于回滚远端更新）。
-      const pulled = await pullOnOpen(path).catch(() => null)
-      if (pulled?.conflict) {
-        // 两边都改过：本地内容先照常渲染，同时弹窗让用户选保留哪边
-        useUiStore.getState().showSyncConflict(pulled.conflict)
+      const node = findTreeNode(get().tree, path)
+      if (node?.remoteOnly) {
+        // 参考项目 `pullMissingRemoteArticle()`：节点只存在于云端，本地磁盘没有，
+        // 点开时先把这一个文件下下来。此路径不看 autoPullOnOpen 开关。
+        await pullRemoteFileOnDemand(path)
+        void get().loadTree()
+      } else {
+        const pulled = await pullOnOpen(path).catch(() => null)
+        if (pulled?.conflict) {
+          // 两边都改过：本地内容先照常渲染，同时弹窗让用户选保留哪边
+          useUiStore.getState().showSyncConflict(pulled.conflict)
+        }
       }
       const file = await rpc.readFile(path)
       const opened = get().tabs.some((tab) => tab.path === path)

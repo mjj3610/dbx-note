@@ -25,7 +25,10 @@ const PORT = Number(argValue('port', '5195'))
 const DATA_DIR = resolve(ROOT, argValue('data', '.tmp/dev-data'))
 const WORKSPACE = argValue('workspace', '')
 const UI_DIR = join(ROOT, 'ui')
-const BIN = join(ROOT, 'backend', 'target', 'release', process.platform === 'win32' ? 'backend.exe' : 'backend')
+// 默认用 release 产物；本地快速回归可用 DBX_NOTE_BACKEND 指向 debug 二进制
+const BIN = process.env.DBX_NOTE_BACKEND
+  ? resolve(process.env.DBX_NOTE_BACKEND)
+  : join(ROOT, 'backend', 'target', 'release', process.platform === 'win32' ? 'backend.exe' : 'backend')
 
 if (!existsSync(UI_DIR)) {
   console.error('缺少 ui/ 产物，请先运行 npm run build')

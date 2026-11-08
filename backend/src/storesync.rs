@@ -1034,6 +1034,90 @@ pub fn check(app: &App) -> RpcResult {
     }
 }
 
+/// `sync/remoteTree` 的对象存储 / WebDAV / 自托管分支
+///
+/// 与 Git 通道保持同一份协议：进入文件树时只读一次远端清单（manifest），
+/// 不下载任何正文；只存在于远端的条目由前端插成「云端」节点，点开再拉。
+pub fn remote_tree(app: &App) -> RpcResult {
+    let root = path_of(app);
+    let (options, transport) = match resolve(app) {
+        Ok(value) => value,
+        Err(error) => {
+            return Ok(json!({
+                "configured": false,
+                "offline": false,
+                "provider": store_provider(&sync::load_options(app)),
+                "files": [],
+                "message": error.message,
+            }))
+        }
+    };
+    let provider = store_provider(&options);
+    let manifest = match read_manifest(&transport) {
+        Ok(value) => value,
+        Err(error) => {
+            return Ok(json!({
+                "configured": true,
+                "offline": true,
+                "provider": provider,
+                "files": [],
+                "message": error.message,
+            }))
+        }
+    };
+
+    let remote = manifest_files(&manifest);
+    let local = scan_local(&root, true);
+    let state = read_state(&root);
+    let mut files = Vec::new();
+    for (rel, entry) in &remote {
+        if !crate::gitsync::tree_note_file(rel) || files.len() >= 5_000 {
+            continue;
+        }
+        let sha = entry
+            .get("hash")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        let size = entry.get("size").and_then(Value::as_u64).unwrap_or(0);
+        let mtime = entry.get("mtime").and_then(Value::as_i64).unwrap_or(0);
+        let local_file = local.get(rel);
+        let base = state_hash(&state, rel);
+        let status = match (local_file, base.as_deref()) {
+            (None, _) => "remoteOnly",
+            (Some(file), _) if file.hash == sha => "synced",
+            (Some(file), Some(base_sha)) if base_sha == file.hash => "updated",
+            (Some(_), Some(base_sha)) if base_sha == sha => "localNewer",
+            (Some(_), _) => "conflict",
+        };
+        files.push(json!({
+            "path": rel,
+            "sha": sha,
+            "size": size,
+            "mtime": mtime,
+            "status": status,
+            "localExists": local_file.is_some(),
+        }));
+    }
+
+    let local_only: Vec<String> = local
+        .keys()
+        .filter(|rel| crate::gitsync::tree_note_file(rel) && !remote.contains_key(rel.as_str()))
+        .cloned()
+        .collect();
+
+    Ok(json!({
+        "configured": true,
+        "offline": false,
+        "provider": provider,
+        "channel": "store",
+        "head": "",
+        "branch": "",
+        "files": files,
+        "localOnly": local_only,
+    }))
+}
+
 /// `sync/storeStatus`：本地 / 远端差异总览
 pub fn status(app: &App) -> RpcResult {
     let root = path_of(app);

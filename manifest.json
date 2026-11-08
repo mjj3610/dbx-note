@@ -3,7 +3,7 @@
   "manifest_version": 1,
   "id": "com.mjj3610.note",
   "name": "Note Studio",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "publisher": "mjj3610",
   "description": "Local-first Markdown notes and quick records with AI assistance: file workspace, WYSIWYG editor, tags, full-text search and streaming chat.",
   "icon": "assets/plugin.svg",

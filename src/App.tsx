@@ -21,6 +21,7 @@ import { SettingsDialog } from '@/components/dialogs/SettingsDialog'
 import { SyncConflictDialog } from '@/components/dialogs/SyncConflictDialog'
 import { Button } from '@/components/ui/button'
 import { TooltipProvider } from '@/components/ui/tooltip'
+import { pullOnOpen } from '@/lib/autoSync'
 import { awaitHostReady, isHosted, watchHostAppearance } from '@/lib/bridge'
 import * as rpc from '@/lib/rpc'
 import { captureMessage, pollPendingShot, startScreenshot } from '@/lib/screenshot'
@@ -129,6 +130,42 @@ export default function App() {
     bootStarted = true
     void boot()
   }, [])
+
+  /**
+   * 回到应用时重新拉一次远端目录清单
+   *
+   * 参考项目的 `unified-sync-status` 在窗口重新可用时也会重跑 loadRemoteSyncFiles。
+   * 「刚启动」由 boot 里的 loadTree() 负责，这里覆盖「切走再回来」这一半场景；
+   * 当前打开的笔记顺带再做一次单文件比对，远端有新版本就刷新编辑器。
+   */
+  useEffect(() => {
+    if (status !== 'ready') return
+    let lastRefresh = 0
+    const refresh = () => {
+      if (Date.now() - lastRefresh < 5_000) return
+      lastRefresh = Date.now()
+      const notes = useNotesStore.getState()
+      void notes.refreshRemoteTree()
+      const activePath = notes.activePath
+      if (!activePath) return
+      void pullOnOpen(activePath)
+        .then(async (result) => {
+          if (result?.updated) await useNotesStore.getState().reloadActive()
+        })
+        .catch(() => {
+          /* 离线或同步未配置时静默沿用本地内容 */
+        })
+    }
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') refresh()
+    }
+    window.addEventListener('focus', refresh)
+    document.addEventListener('visibilitychange', onVisible)
+    return () => {
+      window.removeEventListener('focus', refresh)
+      document.removeEventListener('visibilitychange', onVisible)
+    }
+  }, [status])
 
   // 深浅色：系统主题 + 宿主主题变化都要跟随
   useEffect(() => {

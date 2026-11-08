@@ -26,6 +26,12 @@ export interface TreeNode {
   children?: TreeNode[]
   size?: number
   mtime?: number
+  /** 只存在于云端、本地还没下载（对齐参考项目的 isLocale: false 节点） */
+  remoteOnly?: boolean
+  /** 本地有这个文件，但云端有新版本 */
+  remoteUpdated?: boolean
+  /** 云端清单里的 blob / 内容哈希，用于判定是否需要拉取 */
+  remoteSha?: string
 }
 
 export interface DirListing {
@@ -766,6 +772,42 @@ export interface SyncFileDecision {
   remoteContent?: string
   /** 远端不可达（离线 / 凭据失效）时为 true，不阻断打开文件 */
   offline?: boolean
+}
+
+/** 远端目录清单里的一条（对应参考项目 RemoteDirectoryEntry） */
+export type RemoteFileStatus = 'remoteOnly' | 'updated' | 'conflict' | 'localNewer' | 'synced'
+
+export interface RemoteTreeFile {
+  path: string
+  sha: string
+  size: number
+  mtime: number
+  status: RemoteFileStatus
+  localExists: boolean
+}
+
+/** 远端清单快照：只含元信息，不含任何笔记正文 */
+export interface RemoteTreeSnapshot {
+  configured: boolean
+  offline: boolean
+  provider: string
+  channel?: 'git' | 'store'
+  head?: string
+  branch?: string
+  message?: string
+  files: RemoteTreeFile[]
+  localOnly: string[]
+}
+
+/**
+ * 进入文件树时拉取远端「目录清单」
+ *
+ * 与参考项目 `loadRemoteSyncFiles()` 同义：不下载正文，只用于把仅云端节点
+ * 合并进文件树、给本地节点打「云端有更新」标记。失败时后端返回 offline，
+ * 调用方静默保留本地树即可。
+ */
+export function syncRemoteTree(): Promise<RemoteTreeSnapshot> {
+  return call('sync/remoteTree', {}, 120_000)
 }
 
 /** 判定单个文件是否需要拉取 */

@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import {
   ChevronRight,
+  Cloud,
+  CloudDownload,
   FilePlus2,
   FileText,
   Folder,
@@ -21,6 +23,7 @@ import {
   ContextMenuTrigger,
 } from '@/components/ui/menu'
 import { Button } from '@/components/ui/button'
+import { pullRemoteFileOnDemand } from '@/lib/autoSync'
 import type { TreeNode } from '@/lib/rpc'
 import { cn } from '@/lib/utils'
 import { useT } from '@/lib/useT'
@@ -109,6 +112,22 @@ function TreeLevel({
   )
 }
 
+/** 收集某个云端目录下的所有「仅云端」文件，供右键「下载整个目录」用 */
+function remoteFilesIn(node: TreeNode): string[] {
+  const result: string[] = []
+  const walk = (list: TreeNode[]) => {
+    for (const item of list) {
+      if (item.kind === 'folder') {
+        if (item.children) walk(item.children)
+      } else if (item.remoteOnly) {
+        result.push(item.path)
+      }
+    }
+  }
+  walk(node.children ?? [])
+  return result
+}
+
 function TreeRow({ node, level, forcedExpand }: { node: TreeNode; level: number; forcedExpand: boolean }) {
   const t = useT()
   const activePath = useNotesStore((state) => state.activePath)
@@ -126,16 +145,41 @@ function TreeRow({ node, level, forcedExpand }: { node: TreeNode; level: number;
 
   const isFolder = node.kind === 'folder'
   const isImage = node.kind === 'image'
+  const isRemoteOnly = Boolean(node.remoteOnly)
+  const isRemoteUpdated = Boolean(node.remoteUpdated)
   const isOpen = forcedExpand || expanded.includes(node.path)
   const isActive = activePath === node.path
+
+  /** 把仅云端条目下载到本地并刷新文件树 */
+  const downloadRemote = async () => {
+    const targets = isFolder ? remoteFilesIn(node) : [node.path]
+    for (const target of targets) {
+      await pullRemoteFileOnDemand(target)
+    }
+    await useNotesStore.getState().loadTree()
+  }
+
+  const downloadWithToast = () => {
+    void downloadRemote().catch((error) =>
+      toast.error(t('files.pullFailed', { message: error instanceof Error ? error.message : String(error) })),
+    )
+  }
 
   const handleClick = () => {
     if (isFolder) {
       toggleExpand(node.path)
       return
     }
-    // 图片没有编辑器，点开走预览弹窗
+    // 图片没有编辑器，点开走预览弹窗；云端图片先下到本地再预览
     if (isImage) {
+      if (isRemoteOnly) {
+        void downloadRemote()
+          .then(() => setImagePreview(node.path))
+          .catch((error) =>
+            toast.error(t('files.pullFailed', { message: error instanceof Error ? error.message : String(error) })),
+          )
+        return
+      }
       setImagePreview(node.path)
       return
     }
@@ -156,6 +200,13 @@ function TreeRow({ node, level, forcedExpand }: { node: TreeNode; level: number;
             role="treeitem"
             aria-expanded={isFolder ? isOpen : undefined}
             aria-selected={isActive}
+            title={
+              isRemoteOnly
+                ? t('files.remoteOnly')
+                : isRemoteUpdated
+                  ? t('files.remoteUpdated')
+                  : undefined
+            }
           >
             {isFolder ? (
               <ChevronRight
@@ -173,6 +224,8 @@ function TreeRow({ node, level, forcedExpand }: { node: TreeNode; level: number;
               ) : (
                 <Folder className="size-4 shrink-0 text-muted-foreground" />
               )
+            ) : isRemoteOnly ? (
+              <CloudDownload className="size-3.5 shrink-0 text-sky-500" />
             ) : isImage ? (
               <ImageIcon className="size-3.5 shrink-0 text-muted-foreground" />
             ) : (
@@ -191,38 +244,51 @@ function TreeRow({ node, level, forcedExpand }: { node: TreeNode; level: number;
             ) : (
               <span className="min-w-0 flex-1 truncate text-[13px]">{node.name.replace(/\.(md|markdown|txt)$/i, '')}</span>
             )}
+            {isRemoteUpdated && !isRemoteOnly ? (
+              <Cloud className="size-3 shrink-0 text-amber-500" aria-label={t('files.remoteUpdated')} />
+            ) : null}
           </div>
         </ContextMenuTrigger>
         <ContextMenuContent className="w-52">
-          {isFolder ? (
+          {isRemoteOnly ? (
+            // 本地磁盘上还没有这个条目：只提供下载，重命名 / 删除要等落地后才有意义
+            <ContextMenuItem onSelect={downloadWithToast}>
+              <CloudDownload />
+              {isFolder ? t('files.downloadRemoteFolder') : t('files.downloadRemote')}
+            </ContextMenuItem>
+          ) : (
             <>
-              <ContextMenuItem onSelect={() => startNewItem('file', node.path)}>
-                <FilePlus2 />
-                {t('sidebar.newNote')}
+              {isFolder ? (
+                <>
+                  <ContextMenuItem onSelect={() => startNewItem('file', node.path)}>
+                    <FilePlus2 />
+                    {t('sidebar.newNote')}
+                  </ContextMenuItem>
+                  <ContextMenuItem onSelect={() => startNewItem('folder', node.path)}>
+                    <FolderPlus />
+                    {t('sidebar.newFolder')}
+                  </ContextMenuItem>
+                  <ContextMenuSeparator />
+                </>
+              ) : null}
+              <ContextMenuItem
+                onSelect={() => {
+                  expandTo(node.path)
+                  startRename(node.path)
+                }}
+              >
+                <Pencil />
+                {t('common.rename')}
               </ContextMenuItem>
-              <ContextMenuItem onSelect={() => startNewItem('folder', node.path)}>
-                <FolderPlus />
-                {t('sidebar.newFolder')}
+              <ContextMenuItem
+                className="text-destructive data-[highlighted]:bg-destructive/10 data-[highlighted]:text-destructive"
+                onSelect={() => confirmDelete(node.path)}
+              >
+                <Trash2 />
+                {t('common.delete')}
               </ContextMenuItem>
-              <ContextMenuSeparator />
             </>
-          ) : null}
-          <ContextMenuItem
-            onSelect={() => {
-              expandTo(node.path)
-              startRename(node.path)
-            }}
-          >
-            <Pencil />
-            {t('common.rename')}
-          </ContextMenuItem>
-          <ContextMenuItem
-            className="text-destructive data-[highlighted]:bg-destructive/10 data-[highlighted]:text-destructive"
-            onSelect={() => confirmDelete(node.path)}
-          >
-            <Trash2 />
-            {t('common.delete')}
-          </ContextMenuItem>
+          )}
         </ContextMenuContent>
       </ContextMenu>
 

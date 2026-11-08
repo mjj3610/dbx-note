@@ -202,6 +202,11 @@ const zhCN: Dict = {
   'files.openFailed': '打开失败：{{message}}',
   'files.imageHint': '图片预览',
   'files.root': '工作区',
+  'files.remoteOnly': '云端文件：点击即可下载到本地',
+  'files.remoteUpdated': '云端有更新：打开时将自动拉取',
+  'files.downloadRemote': '下载到本地',
+  'files.downloadRemoteFolder': '下载目录内全部云端文件',
+  'files.pullFailed': '下载云端文件失败：{{message}}',
 
   'editor.placeholder': '开始记录你的想法…',
   'editor.source': '源码',
@@ -1420,6 +1425,11 @@ const en: Dict = {
   'files.openFailed': 'Open failed: {{message}}',
   'files.imageHint': 'Image preview',
   'files.root': 'Workspace',
+  'files.remoteOnly': 'Cloud-only file: click to download it locally',
+  'files.remoteUpdated': 'Newer version in the cloud: it will be pulled when opened',
+  'files.downloadRemote': 'Download to local',
+  'files.downloadRemoteFolder': 'Download all cloud files in this folder',
+  'files.pullFailed': 'Failed to download cloud file: {{message}}',
 
   'editor.placeholder': 'Start writing…',
   'editor.source': 'Source',

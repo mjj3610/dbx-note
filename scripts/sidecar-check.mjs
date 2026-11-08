@@ -16,7 +16,10 @@ import { createServer as createNetServer } from 'node:net'
 import { join, resolve } from 'node:path'
 
 const ROOT = resolve(import.meta.dirname, '..')
-const BIN = join(ROOT, 'backend', 'target', 'release', process.platform === 'win32' ? 'backend.exe' : 'backend')
+// 默认用 release 产物；本地快速回归可用 DBX_NOTE_BACKEND 指向 debug 二进制
+const BIN = process.env.DBX_NOTE_BACKEND
+  ? resolve(process.env.DBX_NOTE_BACKEND)
+  : join(ROOT, 'backend', 'target', 'release', process.platform === 'win32' ? 'backend.exe' : 'backend')
 const DATA_DIR = join(ROOT, '.tmp', 'sidecar-check')
 /** 以 manifest 为准，避免每次升版本都要改测试 */
 const MANIFEST = JSON.parse(readFileSync(join(ROOT, 'manifest.json'), 'utf8'))
@@ -691,6 +694,28 @@ async function main() {
     git(['add', '-A'], peerDir)
     git(['commit', '-m', 'peer add'], peerDir)
     git(['push'], peerDir)
+
+    // 进入文件树时自动拉「远端目录清单」（参考项目 loadRemoteSyncFiles）：
+    // 这一步只拿元信息，仅云端节点要能在树里显示出来，正文仍不下载。
+    const remoteTree = await call('sync/remoteTree')
+    const remoteNew = (remoteTree.files ?? []).find((item) => item.path === 'peer-new.md')
+    check(
+      '进入文件树能拉到远端目录清单',
+      remoteTree.configured === true && remoteTree.offline === false && Array.isArray(remoteTree.files),
+      JSON.stringify({ configured: remoteTree.configured, count: remoteTree.files?.length }),
+    )
+    check(
+      '远端新增笔记在清单里标成「仅云端」',
+      remoteNew?.status === 'remoteOnly' && remoteNew.localExists === false,
+      JSON.stringify(remoteNew),
+    )
+    check('只拉清单，不会预先下载正文', !existsSync(join(WORKSPACE, 'peer-new.md')))
+    check(
+      '清单只含笔记与图片，不带仓库配置文件',
+      !(remoteTree.files ?? []).some((item) => item.path === '.gitignore'),
+      JSON.stringify((remoteTree.files ?? []).map((item) => item.path)),
+    )
+
     const pulledAll = await call('sync/pullAll')
     check(
       '拉取全部会下载远端新增文件',
@@ -698,6 +723,13 @@ async function main() {
       JSON.stringify(pulledAll),
     )
     check('新增文件基线已对齐', (await call('sync/compare', { path: 'peer-new.md' })).action === 'none')
+    const remoteAfter = await call('sync/remoteTree')
+    const localNow = (remoteAfter.files ?? []).find((item) => item.path === 'peer-new.md')
+    check(
+      '下载后清单里该条目变成本地已存在',
+      localNow?.localExists === true && localNow.status !== 'remoteOnly',
+      JSON.stringify(localNow),
+    )
 
     // 本地未推送的修改不能被远端覆盖（参考项目只比远端 SHA 会覆盖，这里必须判冲突）
     writeFileSync(join(WORKSPACE, 'peer-new.md'), '# 本地又改了\n')
