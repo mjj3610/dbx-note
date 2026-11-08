@@ -186,7 +186,20 @@ fn fetch_snapshot(app: &App) -> Result<Snapshot, RpcError> {
     let token = config.get("token").and_then(Value::as_str).unwrap_or_default();
     let target = sync::authorized_url(&remote, provider, token).unwrap_or_else(|| "origin".to_string());
 
-    let (ok, _, err) = sync::git(&root, &["fetch", "--prune", &target, &branch]);
+    // 低速阈值：弱网时 15 秒内不足 1KB/s 就中断，避免打开笔记长时间转圈
+    let (ok, _, err) = sync::git(
+        &root,
+        &[
+            "-c",
+            "http.lowSpeedLimit=1000",
+            "-c",
+            "http.lowSpeedTime=15",
+            "fetch",
+            "--prune",
+            &target,
+            &branch,
+        ],
+    );
     if !ok {
         return Err(sync::fail(&err, "git fetch 失败：请检查网络与仓库凭据"));
     }

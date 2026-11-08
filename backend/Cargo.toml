@@ -1,6 +1,6 @@
 [package]
 name = "dbx-note-backend"
-version = "0.5.0"
+version = "0.5.1"
 edition = "2021"
 description = "DBX 笔记插件原生 Sidecar：工作区文件读写、记录与对话存储、AI 代理"
 license = "GPL-3.0-or-later"

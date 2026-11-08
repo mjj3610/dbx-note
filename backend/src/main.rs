@@ -66,7 +66,7 @@ use serde_json::{json, Value};
 
 /// 插件标识与版本，必须与 manifest.json 保持一致
 const PLUGIN_ID: &str = "com.mjj3610.note";
-pub(crate) const PLUGIN_VERSION: &str = "0.5.0";
+pub(crate) const PLUGIN_VERSION: &str = "0.5.1";
 /// 协议版本
 const PROTOCOL_VERSION: i64 = 1;
 

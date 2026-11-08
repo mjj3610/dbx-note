@@ -12,6 +12,7 @@ import { spawn, execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:http'
+import { createServer as createNetServer } from 'node:net'
 import { join, resolve } from 'node:path'
 
 const ROOT = resolve(import.meta.dirname, '..')
@@ -70,6 +71,25 @@ function git(args, cwd) {
 function gitIdentity(dir) {
   git(['config', 'user.name', 'self-check'], dir)
   git(['config', 'user.email', 'check@example.com'], dir)
+}
+
+/**
+ * 取一个空闲端口
+ *
+ * 原本假模型服务写死 5198，但开发机上别的项目（如 dbx-browser 的 devhost）
+ * 默认也用这个端口，占上之后 mock 服务起不来，自检就假失败。
+ * 这里让系统分配一个空闲端口，起服务前再确认一次可用。
+ * @returns {Promise<number>} 可用端口号
+ */
+function pickFreePort() {
+  return new Promise((resolvePort, rejectPort) => {
+    const probe = createNetServer()
+    probe.once('error', rejectPort)
+    probe.listen(0, '127.0.0.1', () => {
+      const { port } = probe.address()
+      probe.close(() => resolvePort(port))
+    })
+  })
 }
 
 /**
@@ -721,7 +741,7 @@ async function main() {
   check('只允许删除 backups/ 下的文件', backupGuard)
 
   // 图片识别 / 语音转写：起一个假模型服务走一遍真实 HTTP 通道
-  const MOCK_PORT = 5198
+  const MOCK_PORT = await pickFreePort()
   const mock = spawn(
     process.execPath,
     [join(ROOT, 'scripts', 'mock-ai.mjs'), '--port', String(MOCK_PORT)],

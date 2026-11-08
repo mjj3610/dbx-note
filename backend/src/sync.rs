@@ -38,6 +38,7 @@ pub(crate) fn git(root: &PathBuf, args: &[&str]) -> (bool, String, String) {
         .arg("-c")
         .arg("core.quotepath=false")
         .args(args);
+    apply_git_env(&mut command);
     #[cfg(target_os = "windows")]
     {
         use std::os::windows::process::CommandExt;
@@ -54,6 +55,22 @@ pub(crate) fn git(root: &PathBuf, args: &[&str]) -> (bool, String, String) {
     }
 }
 
+/// git 子进程的环境约束
+///
+/// - `GIT_TERMINAL_PROMPT=0`：没有凭据时立刻失败，而不是卡在「输入用户名密码」上。
+///   `sync/compare` 现在会在打开笔记时同步执行，一次等待输入就等于界面卡死；
+/// - 低速传输 15 秒直接中断，避免弱网时打开笔记长时间转圈；
+/// - 关掉 git 的交互式编辑器 / 分页器，防止任何子命令等待终端输入。
+fn apply_git_env(command: &mut Command) {
+    command
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .env("GCM_INTERACTIVE", "never")
+        .env("GIT_PAGER", "cat")
+        .env("GIT_EDITOR", "true")
+        .env("GIT_ASKPASS", "echo")
+        .env("SSH_ASKPASS", "echo");
+}
+
 /// 与 `git()` 相同，但 stdout 原样返回字节
 ///
 /// 拉取笔记正文必须按字节处理：附件、图片等二进制文件不能走 `String::from_utf8_lossy`，
@@ -66,6 +83,7 @@ pub(crate) fn git_bytes(root: &PathBuf, args: &[&str]) -> (bool, Vec<u8>, String
         .arg("-c")
         .arg("core.quotepath=false")
         .args(args);
+    apply_git_env(&mut command);
     #[cfg(target_os = "windows")]
     {
         use std::os::windows::process::CommandExt;
