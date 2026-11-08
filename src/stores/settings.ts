@@ -414,6 +414,16 @@ export const DEFAULT_SKILLS: SkillItem[] = [
 
 const STORAGE_KEY = 'app.settings'
 
+/**
+ * 设置落盘的串行队列
+ *
+ * `patch` / `patchHosting` 都是「先更新内存、再异步写盘」。连续两次修改会发出
+ * 两个 setSetting 请求；后端较慢时先发的那个可能后到，把旧快照覆盖回新值
+ * （典型表现：刚点完「使用此服务」，磁盘上的 provider 又变回 local）。
+ * 这里把写盘串成一条链，并且每次真正写之前才读一次最新状态。
+ */
+let persistChain: Promise<void> = Promise.resolve()
+
 /** 应用级快捷键默认绑定（与 NoteGen 的快捷键页对齐，可改可清空） */
 export const DEFAULT_SHORTCUTS: Record<string, string> = {
   'app.search': 'Ctrl+Shift+F',
@@ -903,8 +913,42 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
 
   setWorkspace: (info) => set({ workspace: info }),
 
-  persist: async () => {
-    const {
+  persist: () => {
+    persistChain = persistChain
+      .catch(() => undefined)
+      .then(() => writeSettings());
+    return persistChain
+  },
+}))
+
+/** 真正落盘：执行时才读状态，保证队列里最后一写用的是最新值 */
+async function writeSettings(): Promise<void> {
+  const {
+    theme,
+    locale,
+    fontSize,
+    editorWidth,
+    ai,
+    memories,
+    skills,
+    knowledgeEnabled,
+    mcpEnabled,
+    image,
+    imageHosting,
+    ocr,
+    voice,
+    editor,
+    record,
+    canvas,
+    webSearch,
+    prompt,
+    audio,
+    imageMethod,
+    template,
+    shortcuts,
+  } = useSettingsStore.getState()
+  try {
+    await setSetting(STORAGE_KEY, {
       theme,
       locale,
       fontSize,
@@ -927,37 +971,11 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       imageMethod,
       template,
       shortcuts,
-    } = get()
-    try {
-      await setSetting(STORAGE_KEY, {
-        theme,
-        locale,
-        fontSize,
-        editorWidth,
-        ai,
-        memories,
-        skills,
-        knowledgeEnabled,
-        mcpEnabled,
-        image,
-        imageHosting,
-        ocr,
-        voice,
-        editor,
-        record,
-        canvas,
-        webSearch,
-        prompt,
-        audio,
-        imageMethod,
-        template,
-        shortcuts,
-      })
-    } catch (error) {
-      console.warn('[settings] 保存失败', error)
-    }
-  },
-}))
+    })
+  } catch (error) {
+    console.warn('[settings] 保存失败', error)
+  }
+}
 
 /** 编辑器字号、正文宽度与行高通过 CSS 变量下发，避免逐组件传参 */
 function applyEditorPreferences(
