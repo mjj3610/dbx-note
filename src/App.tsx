@@ -18,6 +18,7 @@ import { ScreenshotOverlay } from '@/components/dialogs/ScreenshotOverlay'
 import { VoiceDialog } from '@/components/dialogs/VoiceDialog'
 import { SearchDialog } from '@/components/dialogs/SearchDialog'
 import { SettingsDialog } from '@/components/dialogs/SettingsDialog'
+import { SyncConflictDialog } from '@/components/dialogs/SyncConflictDialog'
 import { Button } from '@/components/ui/button'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { awaitHostReady, isHosted, watchHostAppearance } from '@/lib/bridge'
@@ -371,6 +372,7 @@ export default function App() {
         <DirPickerDialog />
         <ImageDialog />
         <VoiceDialog />
+        <SyncConflictDialog />
         <ScreenshotOverlay />
         <DeleteConfirmDialog />
         <Toaster

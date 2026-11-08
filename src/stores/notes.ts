@@ -13,7 +13,8 @@ import * as rpc from '@/lib/rpc'
 import type { TreeNode } from '@/lib/rpc'
 import { baseName, dirName } from '@/lib/utils'
 import { useSettingsStore } from '@/stores/settings'
-import { scheduleAutoSync, schedulePullOnOpen } from '@/lib/autoSync'
+import { useUiStore } from '@/stores/ui'
+import { pullOnOpen, scheduleAutoSync } from '@/lib/autoSync'
 
 export type SaveState = 'idle' | 'saving' | 'saved' | 'error'
 
@@ -48,6 +49,13 @@ interface NotesState {
 
   loadTree: () => Promise<void>
   open: (path: string) => Promise<void>
+  /**
+   * 重新读当前文件（手动拉取 / 解决冲突后调用）
+   *
+   * 有未保存改动时不动磁盘内容，只在 `force` 时强制以磁盘为准，
+   * 避免把用户正在输入的文字冲掉。
+   */
+  reloadActive: (options?: { force?: boolean }) => Promise<void>
   restoreTabs: (paths: string[], activePath: string) => Promise<void>
   closeTab: (path: string) => Promise<void>
   closeTabs: (paths: string[]) => Promise<void>
@@ -149,6 +157,14 @@ export const useNotesStore = create<NotesState>((set, get) => ({
 
     set({ loadingFile: true, lastError: null })
     try {
+      // 先比对远端、按需拉取，再读盘。
+      // 顺序不能反：以前是「读盘 → 异步 pull」，拉完编辑器仍持有旧内容，
+      // 用户一编辑保存就会把刚拉下来的版本覆盖掉（等于回滚远端更新）。
+      const pulled = await pullOnOpen(path).catch(() => null)
+      if (pulled?.conflict) {
+        // 两边都改过：本地内容先照常渲染，同时弹窗让用户选保留哪边
+        useUiStore.getState().showSyncConflict(pulled.conflict)
+      }
       const file = await rpc.readFile(path)
       const opened = get().tabs.some((tab) => tab.path === path)
       const tabs = opened
@@ -165,12 +181,29 @@ export const useNotesStore = create<NotesState>((set, get) => ({
       })
       persistTabs(tabs, path)
       get().expandTo(path)
-      // 「打开或切换文件时自动拉取」：远端有更新才拉，且同一段时间内只拉一次
-      schedulePullOnOpen()
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       set({ loadingFile: false, lastError: message })
       throw error
+    }
+  },
+
+  /** 重新读当前文件：手动拉取、解决冲突、拉取全部之后调用 */
+  reloadActive: async (options) => {
+    const { activePath, content, savedContent, tabs } = get()
+    if (!activePath) return
+    if (!options?.force && content !== savedContent) return
+    try {
+      const file = await rpc.readFile(activePath)
+      set({
+        content: file.content,
+        savedContent: file.content,
+        tabs: updateTab(tabs, activePath, { dirty: false }),
+        saveState: 'idle',
+      })
+    } catch (error) {
+      // 文件可能在远端被删了：保留现状，只在状态栏提示
+      set({ lastError: error instanceof Error ? error.message : String(error) })
     }
   },
 

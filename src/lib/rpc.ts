@@ -747,6 +747,69 @@ export function syncPush(): Promise<{ ok: boolean; output: string }> {
   return call('sync/push', {}, 180_000)
 }
 
+/* ---------------- Git 通道的单文件同步 ---------------- */
+
+/** 单个文件的同步判定结果（对齐 NoteGen 的 compareFileVersions） */
+export interface SyncFileDecision {
+  path: string
+  /** pull=需要拉取；push=本地较新；conflict=两边都改过；none=已同步 */
+  action: 'pull' | 'push' | 'conflict' | 'none'
+  reason: string
+  remoteSha: string
+  baseSha: string
+  remoteMtime: number
+  remoteSize: number
+  localMtime: number
+  localExists: boolean
+  /** 仅在 conflict 时回传，供弹窗做左右对比 */
+  localContent?: string
+  remoteContent?: string
+  /** 远端不可达（离线 / 凭据失效）时为 true，不阻断打开文件 */
+  offline?: boolean
+}
+
+/** 判定单个文件是否需要拉取 */
+export function syncCompare(path: string): Promise<SyncFileDecision> {
+  return call('sync/compare', { path }, 60_000)
+}
+
+/** 拉取单个文件（会写到磁盘并推进同步基线） */
+export function syncPullFile(path: string): Promise<{
+  updated: boolean
+  created: boolean
+  binary: boolean
+  content: string
+  sha: string
+  head: string
+}> {
+  return call('sync/pullFile', { path }, 120_000)
+}
+
+/** 拉取全部远端文件（新设备 / 首次配置用） */
+export function syncPullAll(): Promise<{
+  head: string
+  pulled: number
+  skipped: number
+  conflicts: string[]
+  failed: string[]
+  message: string
+}> {
+  return call('sync/pullAll', {}, 600_000)
+}
+
+/** 把已提交 / 已推送的版本记为同步基线 */
+export function syncRecordBase(paths?: string[]): Promise<{ updated: number }> {
+  return call('sync/recordBase', paths && paths.length > 0 ? { paths } : {}, 60_000)
+}
+
+/** 解决冲突：remote=采用远端，local=保留本地 */
+export function syncResolveConflict(
+  path: string,
+  side: 'remote' | 'local',
+): Promise<{ updated?: boolean; ok?: boolean; action?: string; content?: string }> {
+  return call('sync/resolveConflict', { path, side }, 120_000)
+}
+
 /* ---------------- 云同步（对象存储 / WebDAV / 自托管） ---------------- */
 
 /** 三条非 Git 通道的配置（字段随平台不同） */

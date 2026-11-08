@@ -53,6 +53,8 @@ interface UiState {
   imagePreview: string | null
   /** 语音转写弹窗 */
   voiceOpen: boolean
+  /** 同步冲突弹窗：本地与远端内容都在改，等用户选保留哪边 */
+  syncConflict: { path: string; local: string; remote: string } | null
 
   setTab: (tab: SidebarTab) => void
   toggleLeft: () => void
@@ -71,6 +73,8 @@ interface UiState {
   setSidePane: (path: string | null) => void
   setImagePreview: (path: string | null) => void
   setVoiceOpen: (open: boolean) => void
+  showSyncConflict: (conflict: { path: string; local: string; remote: string }) => void
+  closeSyncConflict: () => void
 }
 
 export const useUiStore = create<UiState>((set) => ({
@@ -88,6 +92,7 @@ export const useUiStore = create<UiState>((set) => ({
   sidePane: null,
   imagePreview: null,
   voiceOpen: false,
+  syncConflict: null,
 
   setTab: (tab) => set({ tab }),
   toggleLeft: () => set((state) => ({ leftVisible: !state.leftVisible })),
@@ -106,4 +111,6 @@ export const useUiStore = create<UiState>((set) => ({
   setSidePane: (path) => set({ sidePane: path }),
   setImagePreview: (path) => set({ imagePreview: path }),
   setVoiceOpen: (open) => set({ voiceOpen: open }),
+  showSyncConflict: (conflict) => set({ syncConflict: conflict }),
+  closeSyncConflict: () => set({ syncConflict: null }),
 }))

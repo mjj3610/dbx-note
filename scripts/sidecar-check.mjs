@@ -8,7 +8,7 @@
  * 运行：node scripts/sidecar-check.mjs
  * 依赖：已构建的 backend（npm run backend）与 Node 18+
  */
-import { spawn } from 'node:child_process'
+import { spawn, execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:http'
@@ -46,6 +46,30 @@ function check(name, condition, detail = '') {
     failed += 1
     console.error(`  ✗ ${name}${detail ? ` — ${detail}` : ''}`)
   }
+}
+
+/** 本机是否装了 git（Git 通道用例依赖它） */
+function hasGit() {
+  try {
+    execFileSync('git', ['--version'], { stdio: 'ignore' })
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** 调用 git；cwd 为空时在当前目录执行 */
+function git(args, cwd) {
+  return execFileSync('git', cwd ? ['-C', cwd, ...args] : args, {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  })
+}
+
+/** 给临时仓库设提交身份，避免继承开发机的全局配置 */
+function gitIdentity(dir) {
+  git(['config', 'user.name', 'self-check'], dir)
+  git(['config', 'user.email', 'check@example.com'], dir)
 }
 
 /**
@@ -585,6 +609,98 @@ async function main() {
   check('可清除已保存令牌', clearedOptions.options?.hasToken === false)
   // 恢复默认，避免影响后续手工调试
   await call('sync/saveOptions', { provider: 'github', autoCommit: false, messageTemplate: '' })
+
+  // Git 通道单文件同步：远端更新 → 打开即拉取（对齐 NoteGen 的 compareFileVersions / pullFile）
+  if (hasGit()) {
+    const WORKSPACE = join(DATA_DIR, 'workspace')
+    const originDir = join(DATA_DIR, 'git-origin.git')
+    const peerDir = join(DATA_DIR, 'git-peer')
+    rmSync(originDir, { recursive: true, force: true })
+    rmSync(peerDir, { recursive: true, force: true })
+    git(['init', '--bare', originDir])
+
+    // 工作区当仓库，远端指向本地裸仓库（等价于 https 远端，只是不打网络）
+    await call('sync/init', { url: originDir.replace(/\\/g, '/') })
+    gitIdentity(WORKSPACE)
+    const note = join(WORKSPACE, 'sync-test.md')
+    writeFileSync(note, '# 第一版\n')
+    await call('sync/commit', { message: 'seed' })
+    await call('sync/push')
+    await call('sync/recordBase')
+    check('推送后基线已对齐', (await call('sync/compare', { path: 'sync-test.md' })).action === 'none')
+    check('初始化仓库会忽略同步状态目录', readFileSync(join(WORKSPACE, '.gitignore'), 'utf8').includes('.dbx-note/'))
+
+    // 另一台设备改了同一个笔记并推送
+    git(['clone', originDir, peerDir])
+    gitIdentity(peerDir)
+    writeFileSync(join(peerDir, 'sync-test.md'), '# 远端改过的版本\n')
+    git(['add', '-A'], peerDir)
+    git(['commit', '-m', 'peer edit'], peerDir)
+    git(['push'], peerDir)
+
+    const changed = await call('sync/compare', { path: 'sync-test.md' })
+    check('远端更新后判定需要拉取', changed.action === 'pull', `${changed.action} / ${changed.reason}`)
+    const pulledFile = await call('sync/pullFile', { path: 'sync-test.md' })
+    check(
+      '拉取返回远端内容',
+      pulledFile.updated === true && pulledFile.content.includes('远端改过的版本'),
+      pulledFile.content,
+    )
+    check('拉取后磁盘内容已更新', readFileSync(note, 'utf8').includes('远端改过的版本'))
+    check('拉取后判定已同步', (await call('sync/compare', { path: 'sync-test.md' })).action === 'none')
+
+    // 两边都改过 → 冲突，由界面弹窗决定
+    writeFileSync(note, '# 本地改过的版本\n')
+    writeFileSync(join(peerDir, 'sync-test.md'), '# 远端第二次\n')
+    git(['add', '-A'], peerDir)
+    git(['commit', '-m', 'peer second'], peerDir)
+    git(['push'], peerDir)
+    const conflict = await call('sync/compare', { path: 'sync-test.md' })
+    check('两边都改判定冲突', conflict.action === 'conflict', `${conflict.action} / ${conflict.reason}`)
+    check(
+      '冲突回传两边内容',
+      String(conflict.localContent).includes('本地改过') &&
+        String(conflict.remoteContent).includes('远端第二次'),
+    )
+    await call('sync/resolveConflict', { path: 'sync-test.md', side: 'remote' })
+    check('采用远端后内容已更新', readFileSync(note, 'utf8').includes('远端第二次'))
+    check('解决冲突后判定已同步', (await call('sync/compare', { path: 'sync-test.md' })).action === 'none')
+
+    // 拉取全部：远端新增的文件也要下来（新设备首次使用场景）
+    writeFileSync(join(peerDir, 'peer-new.md'), '# 远端新增\n')
+    git(['add', '-A'], peerDir)
+    git(['commit', '-m', 'peer add'], peerDir)
+    git(['push'], peerDir)
+    const pulledAll = await call('sync/pullAll')
+    check(
+      '拉取全部会下载远端新增文件',
+      pulledAll.pulled >= 1 && existsSync(join(WORKSPACE, 'peer-new.md')),
+      JSON.stringify(pulledAll),
+    )
+    check('新增文件基线已对齐', (await call('sync/compare', { path: 'peer-new.md' })).action === 'none')
+
+    // 本地未推送的修改不能被远端覆盖（参考项目只比远端 SHA 会覆盖，这里必须判冲突）
+    writeFileSync(join(WORKSPACE, 'peer-new.md'), '# 本地又改了\n')
+    writeFileSync(join(peerDir, 'peer-new.md'), '# 远端也改了\n')
+    git(['add', '-A'], peerDir)
+    git(['commit', '-m', 'peer edit new'], peerDir)
+    git(['push'], peerDir)
+    check(
+      '本地未推送的修改不会被静默覆盖',
+      (await call('sync/compare', { path: 'peer-new.md' })).action === 'conflict',
+    )
+    await call('sync/resolveConflict', { path: 'peer-new.md', side: 'local' })
+    await call('sync/commit', { message: 'keep local' })
+    await call('sync/push')
+    await call('sync/recordBase')
+    check('保留本地后可以正常推送', (await call('sync/compare', { path: 'peer-new.md' })).action === 'none')
+
+    // 清理用例文件，避免影响后面「文件树」与「备份」断言
+    rmSync(note, { force: true })
+    rmSync(join(WORKSPACE, 'peer-new.md'), { force: true })
+  } else {
+    console.log('  · 系统未安装 git，跳过 Git 单文件同步用例')
+  }
 
   // 备份：导出 → 列表 → 删除
   const exported = await call('backup/export', { includeGit: false })

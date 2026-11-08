@@ -21,7 +21,7 @@ use crate::storesync;
 /// 同步配置存在 settings 表里（与 MCP 配置同样的做法）
 const OPTIONS_KEY: &str = "app.sync";
 
-fn root_of(app: &App) -> PathBuf {
+pub(crate) fn root_of(app: &App) -> PathBuf {
     app.root
         .lock()
         .map(|value| value.clone())
@@ -29,7 +29,7 @@ fn root_of(app: &App) -> PathBuf {
 }
 
 /// 统一的 git 调用；返回 (成功?, stdout, stderr)
-fn git(root: &PathBuf, args: &[&str]) -> (bool, String, String) {
+pub(crate) fn git(root: &PathBuf, args: &[&str]) -> (bool, String, String) {
     let mut command = Command::new("git");
     // core.quotepath=false：中文路径原样输出，不转成 \\351 转义
     command
@@ -54,6 +54,49 @@ fn git(root: &PathBuf, args: &[&str]) -> (bool, String, String) {
     }
 }
 
+/// 与 `git()` 相同，但 stdout 原样返回字节
+///
+/// 拉取笔记正文必须按字节处理：附件、图片等二进制文件不能走 `String::from_utf8_lossy`，
+/// 否则一个字节的替换就会破坏文件。
+pub(crate) fn git_bytes(root: &PathBuf, args: &[&str]) -> (bool, Vec<u8>, String) {
+    let mut command = Command::new("git");
+    command
+        .arg("-C")
+        .arg(root)
+        .arg("-c")
+        .arg("core.quotepath=false")
+        .args(args);
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x0800_0000);
+    }
+    match command.output() {
+        Ok(output) => (
+            output.status.success(),
+            output.stdout,
+            String::from_utf8_lossy(&output.stderr).trim().to_string(),
+        ),
+        Err(error) => (false, Vec::new(), format!("{error}")),
+    }
+}
+
+/// 把 `origin/<branch>` 跟踪引用指到指定提交
+///
+/// `git pull <url> <branch>` / `git push <url> <branch>` 只写 `FETCH_HEAD`，
+/// 不更新 `refs/remotes/origin/*`；而 `sync/status` 是用该引用算 ahead/behind 的，
+/// 不修这一步就会一直显示「没有远端更新」，打开即拉取也就永远不触发。
+pub(crate) fn update_tracking_ref(root: &PathBuf, branch: &str, sha: &str) {
+    if branch.is_empty() || sha.is_empty() {
+        return;
+    }
+    let reference = format!("refs/remotes/origin/{branch}");
+    let (ok, _, _) = git(root, &["update-ref", &reference, sha]);
+    if !ok {
+        // 引用写到一半失败不影响本次同步结果，仅影响状态展示，忽略即可
+    }
+}
+
 /// git 是否可用
 fn git_version() -> Option<String> {
     let mut command = Command::new("git");
@@ -70,7 +113,7 @@ fn git_version() -> Option<String> {
     Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
-fn fail(detail: &str, fallback: &str) -> RpcError {
+pub(crate) fn fail(detail: &str, fallback: &str) -> RpcError {
     let message = if detail.is_empty() { fallback } else { detail };
     RpcError::internal(message.to_string())
 }
@@ -212,13 +255,30 @@ fn token_prefix(provider: &str) -> Option<&'static str> {
 }
 
 /// 把 token 拼进 https 地址（只在调用时使用，不写进 .git/config）
-fn authorized_url(url: &str, provider: &str, token: &str) -> Option<String> {
+pub(crate) fn authorized_url(url: &str, provider: &str, token: &str) -> Option<String> {
     if token.trim().is_empty() || !url.starts_with("https://") {
         return None;
     }
     let prefix = token_prefix(provider)?;
     let rest = url.trim_start_matches("https://");
     Some(format!("https://{prefix}:{token}@{rest}"))
+}
+
+/// 当前分支名
+///
+/// `git branch --show-current` 在「还没有任何提交」的空仓库里返回空串，
+/// 这时用 `symbolic-ref` 读 HEAD 指向，仍能拿到 `main` / `master` 的真实名字，
+/// 避免回退成写死的 `main` 后与本地分支不一致。
+pub(crate) fn current_branch(root: &PathBuf) -> String {
+    let (ok, name, _) = git(root, &["branch", "--show-current"]);
+    if ok && !name.trim().is_empty() {
+        return name.trim().to_string();
+    }
+    let (ok, symbolic, _) = git(root, &["symbolic-ref", "--short", "HEAD"]);
+    if ok && !symbolic.trim().is_empty() {
+        return symbolic.trim().to_string();
+    }
+    "main".to_string()
 }
 
 /// 同步状态总览
@@ -305,6 +365,27 @@ pub fn status(app: &App) -> RpcResult {
     Ok(state)
 }
 
+/// 给新仓库补一条 `.gitignore`
+///
+/// `.dbx-note/` 存的是同步状态（对象存储通道的基线），不应该被当成笔记提交；
+/// 已经有 .gitignore 且写了这条就原样不动，避免覆盖用户自己的规则。
+fn ensure_gitignore(root: &PathBuf) {
+    const ENTRY: &str = ".dbx-note/";
+    let path = root.join(".gitignore");
+    let current = std::fs::read_to_string(&path).unwrap_or_default();
+    if current.lines().any(|line| line.trim() == ENTRY) {
+        return;
+    }
+    let mut next = current;
+    if !next.is_empty() && !next.ends_with('\n') {
+        next.push('\n');
+    }
+    next.push_str("# DBX 笔记同步状态（插件自动生成）\n");
+    next.push_str(ENTRY);
+    next.push('\n');
+    let _ = std::fs::write(path, next);
+}
+
 /// 初始化仓库（可选同时设置 origin）
 pub fn init(app: &App, params: &Value) -> RpcResult {
     let root = root_of(app);
@@ -316,6 +397,7 @@ pub fn init(app: &App, params: &Value) -> RpcResult {
     if !ok {
         return Err(fail(&err, "git init 失败"));
     }
+    ensure_gitignore(&root);
     let url = param_str(params, "url");
     if !url.trim().is_empty() {
         let (added, _, err) = git(&root, &["remote", "add", "origin", url.trim()]);
@@ -391,8 +473,7 @@ pub fn commit(app: &App, params: &Value) -> RpcResult {
 /// 拉取远端（保留本地未提交改动，不做强推/强拉）
 pub fn pull(app: &App) -> RpcResult {
     let root = root_of(app);
-    let (_, branch, _) = git(&root, &["branch", "--show-current"]);
-    let branch = if branch.is_empty() { "main".to_string() } else { branch };
+    let branch = current_branch(&root);
     let config = load_options(app);
     let provider = config.get("provider").and_then(Value::as_str).unwrap_or("github");
     let token = config.get("token").and_then(Value::as_str).unwrap_or_default();
@@ -402,32 +483,65 @@ pub fn pull(app: &App) -> RpcResult {
     if !ok {
         return Err(fail(&err, "git pull 失败"));
     }
+    // `pull <url> <branch>` 只写 FETCH_HEAD，同步更新跟踪引用，状态里的 ahead/behind 才准
+    let (_, head, _) = git(&root, &["rev-parse", "FETCH_HEAD"]);
+    update_tracking_ref(&root, &branch, head.trim());
     Ok(json!({ "ok": true, "output": out }))
 }
 
 /// 推送到远端，首次自动建立 upstream
 pub fn push(app: &App) -> RpcResult {
     let root = root_of(app);
-    let (_, branch, _) = git(&root, &["branch", "--show-current"]);
-    let branch = if branch.is_empty() { "main".to_string() } else { branch };
+    let branch = current_branch(&root);
     let config = load_options(app);
     let provider = config.get("provider").and_then(Value::as_str).unwrap_or("github");
     let token = config.get("token").and_then(Value::as_str).unwrap_or_default();
     let (_, remote, _) = git(&root, &["remote", "get-url", "origin"]);
-    match authorized_url(&remote, provider, token) {
+    let (ok, out, err) = match authorized_url(&remote, provider, token) {
         // 带 token 时不写 upstream，避免把凭据落到 .git/config
-        Some(url) => {
-            let (ok, out, err) = git(&root, &["push", &url, &branch]);
-            if !ok {
-                return Err(fail(&err, "git push 失败"));
-            }
-            return Ok(json!({ "ok": true, "output": out }));
-        }
-        None => {}
-    }
-    let (ok, out, err) = git(&root, &["push", "-u", "origin", &branch]);
+        Some(url) => git(&root, &["push", &url, &branch]),
+        None => git(&root, &["push", "-u", "origin", &branch]),
+    };
+    let mut output = out.clone();
+    let mut failure = if ok { String::new() } else { err.clone() };
     if !ok {
-        return Err(fail(&err, "git push 失败"));
+        // 远端领先时先合并一次再推
+        //
+        // 多设备场景下「本地提交 → 远端也被别的设备推进」非常常见，
+        // 直接失败会让自动同步静默停摆、本地开始分叉。这里只处理
+        // 非快进这一类情况，其它错误（凭据、网络）原样抛出。
+        let rejected = failure.contains("non-fast-forward")
+            || failure.contains("fetch first")
+            || failure.contains("rejected")
+            || failure.contains("Updates were rejected");
+        if rejected {
+            // `-X ours`：冲突文件以本地为准
+            //
+            // 用户要么在冲突弹窗里明确选了「保留本地」，要么本地就是当前正在编辑的内容；
+            // 这里再让远端覆盖会直接吃掉用户的输入。不同文件的改动仍会正常合并进来。
+            let (pulled, pull_out, pull_err) = git(
+                &root,
+                &["pull", "--no-rebase", "--autostash", "-X", "ours", "origin", &branch],
+            );
+            if pulled {
+                let (retried, retry_out, retry_err) = git(&root, &["push", "origin", &branch]);
+                if retried {
+                    output = format!("{pull_out}\n{retry_out}");
+                    failure = String::new();
+                } else {
+                    failure = retry_err;
+                }
+            } else {
+                failure = pull_err;
+            }
+        }
     }
-    Ok(json!({ "ok": true, "output": out }))
+    if !failure.is_empty() {
+        return Err(fail(&failure, "git push 失败"));
+    }
+    let (_, head, _) = git(&root, &["rev-parse", "HEAD"]);
+    update_tracking_ref(&root, &branch, head.trim());
+    // 推上去的版本就是新的同步基线：不收口的话下次打开会把同一批文件判成「远端更新」再拉回来
+    crate::gitsync::record_base_from_head(app);
+    Ok(json!({ "ok": true, "output": output }))
 }

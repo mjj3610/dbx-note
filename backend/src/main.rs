@@ -15,6 +15,7 @@ mod backup;
 mod canvas;
 mod db;
 mod files;
+mod gitsync;
 mod imagehost;
 mod logs;
 mod mcp;
@@ -363,6 +364,14 @@ fn dispatch(app: &App, method: &str, params: Value) -> RpcResult {
         "sync/commit" => sync::commit(app, &params),
         "sync/pull" => sync::pull(app),
         "sync/push" => sync::push(app),
+        // 单文件同步：打开笔记时比对远端版本、按需拉取（与 NoteGen 的
+        // compareFileVersions / pullFile / pullAllRemoteLibraryFiles 同构）
+        "sync/fetch" => gitsync::fetch(app),
+        "sync/compare" => gitsync::compare(app, &params),
+        "sync/pullFile" => gitsync::pull_file(app, &params),
+        "sync/pullAll" => gitsync::pull_all(app),
+        "sync/recordBase" => gitsync::record_base(app, &params),
+        "sync/resolveConflict" => gitsync::resolve_conflict(app, &params),
         // 对象存储 / WebDAV / 自托管：文件镜像通道
         "sync/storeOptions" => storesync::options(app),
         "sync/saveStoreOptions" => storesync::save(app, &params),

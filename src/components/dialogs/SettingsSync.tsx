@@ -5,6 +5,7 @@ import {
   ArrowDownToLine,
   ArrowUpFromLine,
   Cloud,
+  CloudDownload,
   Database,
   Download,
   GitBranch,
@@ -34,7 +35,9 @@ import {
   syncInit,
   syncOptions,
   syncPull,
+  syncPullAll,
   syncPush,
+
   syncRemote,
   syncSaveOptions,
   syncSaveStoreOptions,
@@ -60,6 +63,7 @@ import {
 import { invalidateAutoSyncConfig } from '@/lib/autoSync'
 import { cn } from '@/lib/utils'
 import { useT } from '@/lib/useT'
+import { useNotesStore } from '@/stores/notes'
 
 /** 走文件镜像通道的三个平台（不依赖 git） */
 const STORE_PROVIDERS = ['s3', 'webdav', 'selfHosted'] as const
@@ -215,12 +219,36 @@ export function SyncSection() {
       key: 'pull',
       label: t('sync.pull'),
       icon: ArrowDownToLine,
-      run: async () => (await syncPull()).output || t('sync.done'),
+      run: async () => {
+        const result = (await syncPull()).output || t('sync.done')
+        // 整仓库拉取后，文件树与当前正文都要重新加载，否则界面还是旧内容
+        await useNotesStore.getState().loadTree()
+        await useNotesStore.getState().reloadActive()
+        return result
+      },
+    },
+    {
+      key: 'pullAll',
+      label: t('sync.pullAll'),
+      icon: CloudDownload,
+      run: async () => {
+        const result = await syncPullAll()
+        await useNotesStore.getState().loadTree()
+        await useNotesStore.getState().reloadActive()
+        const lines = [t('sync.pullAllDone', { pulled: result.pulled, skipped: result.skipped })]
+        if (result.conflicts.length > 0) {
+          lines.push(t('sync.pullAllConflicts', { count: result.conflicts.length }))
+        }
+        if (result.failed.length > 0) lines.push(result.failed.slice(0, 5).join('\n'))
+        return lines.join('\n')
+      },
     },
     {
       key: 'push',
       label: t('sync.push'),
       icon: ArrowUpFromLine,
+      // 推送成功后基线由后端自己收口（gitsync::record_base_from_head），
+      // 这里不再多发一次 RPC，避免界面多等一个来回
       run: async () => (await syncPush()).output || t('sync.done'),
     },
   ]
@@ -1007,6 +1035,9 @@ function StoreSyncPanel({
             onClick={() =>
               void run('pull', async () => {
                 const result = await syncStorePull()
+                // 下载完同样要刷新文件树与当前正文
+                await useNotesStore.getState().loadTree()
+                await useNotesStore.getState().reloadActive()
                 if (result.failed.length > 0) {
                   throw new Error(`${result.message}\n${result.failed.slice(0, 5).join('\n')}`)
                 }
