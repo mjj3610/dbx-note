@@ -669,16 +669,16 @@ mod win {
         fn export_path_always_ends_with_target_extension() {
             use super::win::normalize_export_path;
             assert_eq!(
-                normalize_export_path(r"C:\Users\me\Downloads\笔记.html", "md"),
-                r"C:\Users\me\Downloads\笔记.md"
+                normalize_export_path(r"D:\exports\笔记.html", "md"),
+                r"D:\exports\笔记.md"
             );
             assert_eq!(
-                normalize_export_path(r"C:\Users\me\Downloads\笔记", "json"),
-                r"C:\Users\me\Downloads\笔记.json"
+                normalize_export_path(r"D:\exports\笔记", "json"),
+                r"D:\exports\笔记.json"
             );
             assert_eq!(
-                normalize_export_path(r"C:\Users\me\Downloads\笔记.md", "md"),
-                r"C:\Users\me\Downloads\笔记.md"
+                normalize_export_path(r"D:\exports\笔记.md", "md"),
+                r"D:\exports\笔记.md"
             );
         }
 
