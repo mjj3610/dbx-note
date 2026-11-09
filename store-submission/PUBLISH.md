@@ -5,22 +5,25 @@
 | 项 | 值 |
 | --- | --- |
 | 已上架版本 | `com.mjj3610.note` **v0.5.0**（#469 已于 2026-11-05 签名并合并） |
-| 版本更新 PR | https://github.com/t8y2/dbx-store/pull/484 （0.5.0 → **0.5.2**，1 文件 +59 行，分支 `add-com.mjj3610.note-0.5.2`，open） |
+| 版本更新 PR | https://github.com/t8y2/dbx-store/pull/486 （0.5.0 → **0.5.3**，1 文件 +59 行，分支 `add-com.mjj3610.note-0.5.3`，open） |
 | 候选包 | 5 个平台，见下表 |
-| 源码 | https://github.com/mjj3610/dbx-note/tree/v0.5.2 |
-| Release | https://github.com/mjj3610/dbx-note/releases/tag/v0.5.2 （CI run 42553966663，一次通过） |
-| PR 校验 | `validate` 失败，**但这是预期的**：日志里唯一错误是 `Catalog contains 1 open candidate(s) awaiting DBX Store signing: com.mjj3610.note@0.5.2` |
+| 源码 | https://github.com/mjj3610/dbx-note/tree/v0.5.3 |
+| Release | https://github.com/mjj3610/dbx-note/releases/tag/v0.5.3 （CI run 42562596951，一次通过） |
+| PR 校验 | `validate` 失败，**但这是预期的**：日志里唯一错误是 `Catalog contains 1 open candidate(s) awaiting DBX Store signing: com.mjj3610.note@0.5.3` |
+| 旧 PR | #484（0.5.2 候选）复核确认未签名、未合并、0 评论后已留言并关闭，避免同一插件出现两个 open 候选 |
 | 待办 | 等维护者审核并评论 `/sign`；签名后 `validate` 转绿，由维护者合并 |
 
 候选包指纹（全部来自 CI 的 `release-candidates.json`，未签名）：
 
 | target | sha256 | size |
 | --- | --- | --- |
-| `windows-x64` | `0e6311e96907c4f4209e0167b16082da98c5f140136dbc1f4c6030778cf3d759` | 3,765,956 |
-| `darwin-arm64` | `37b892ed43e8dcefaca4a1e698102879594cce9cc4ac5d32546820f2ce7629cc` | 3,567,991 |
-| `darwin-x64` | `6aa1837c24438b37db895c6cd8e93a58c0bc54adfc475895b09518e9a77a5dc9` | 3,707,979 |
-| `linux-arm64` | `4c525e9aad444a60b761ed567e46a8ab6dbee60c1228feea08423079554190b8` | 3,642,258 |
-| `linux-x64` | `4e9547acaea48bb880b4758ab74a369b17caefc78c4aea6cbb46bc2df9f7ad4d` | 3,707,948 |
+| `windows-x64` | `197a4a1fa91a609ff1bd68f2aca2b7bc6cd47edd11e7588a1bc37f5322b0d10a` | 3,771,559 |
+| `darwin-arm64` | `d713b71cceddbc5168fec94080cebe47d90f7e95eca2669ac06d91d9e1b67ffb` | 3,575,306 |
+| `darwin-x64` | `df639499c6cbd996d79299ed3c0bf41bd1adaff796c3e3e0c8f78dfd83ce75d5` | 3,716,319 |
+| `linux-arm64` | `b4040fa6f4998c82a3fb6a69853f292d65cc1f44003f33739270ca1d3ce0b26d` | 3,649,583 |
+| `linux-x64` | `4829bea05b6bf9b5eb0845e9f3299a527bd4aafa454939b2b466cfbe73202275` | 3,715,743 |
+
+（上一版 0.5.2 的指纹见 `git show 0cc03ef:store-submission/PUBLISH.md`，其 PR #484 已关闭未合并。）
 
 签名后维护者会把 `plugins/com.mjj3610.note.json`、`catalog/index.json` 写回 PR 并删掉
 `candidates/*.json`。作者侧不需要、也不应该自己填 `signingKeyId` 或改 `verified`。
@@ -48,7 +51,7 @@
 `latestVersion` 为 `0.5.0`。所以 0.4.0 从未上架，也无需再重开 #459。
 **每次发布前都要重新查一次 PR 状态**：本轮就差点按过时记录去「替换 #469」。
 
-### 0.5.2 版本更新：已提交，等待签名
+### 0.5.2 版本更新：PR #484 已关闭（历史记录，被 0.5.3 取代）
 
 0.5.1 修了 Git 通道「打开笔记不拉取」，0.5.2 又补上了「进入文件树时拉远端目录清单 /
 合并仅云端节点」（`docs/版本部署变更说明-v0.5.2.md`）以及全局截图选区 8 向缩放。
@@ -66,14 +69,14 @@
 | `v0.5.2` Release | 已发布（非 draft，才会触发 CI）：https://github.com/mjj3610/dbx-note/releases/tag/v0.5.2 |
 | 5 平台 CI | https://github.com/mjj3610/dbx-note/actions/runs/42553966663 — **success** |
 | 候选 JSON | 已用 CI 的 `release-candidates.json` 生成并本地校验通过 |
-| 商店 PR | https://github.com/t8y2/dbx-store/pull/484 — open，diff 只有 `candidates/com.mjj3610.note.json` |
-| 下一步 | 等维护者 `/sign` |
+| 商店 PR | https://github.com/t8y2/dbx-store/pull/484 — **已关闭未合并**（未签名，被 #486 的 0.5.3 候选取代）；0.5.2 从未上架 |
+| 下一步 | 见下一节 0.5.3 |
 
 注意候选 JSON 的 `sha256` / `size` 必须取 CI 产物，不能用本机 mingw 包重新计算；
 本机 debug 二进制只用于功能回归。发布工作流只认 `release: published` 事件，
 建 draft 或事后编辑 Release 描述都不会触发构建。
 
-### 0.5.3：代码已就绪，发布待决策
+### 0.5.3：已发布，等待签名
 
 0.5.3 复刻了参考项目编辑器底栏的**复制 / 导出 / 历史版本**（`docs/版本部署变更说明-v0.5.3.md`），
 并不在 #484 的 0.5.2 包内。
@@ -85,13 +88,18 @@
 | 商店元数据 | `.dbx-store.json` 的 `source` 已指向 `v0.5.3`，`releaseNotes` 补 0.5.3 段落 |
 | 文档 | `docs/release-notes-v0.5.3.md`、`docs/版本部署变更说明-v0.5.3.md`、`README.md` 功能矩阵与测试数 |
 | 回归 | `cargo check` / `cargo build --release`、`tsc`、`vite build`、Sidecar **145/0**、smoke **12/0**、e2e **253/0** 全绿 |
-| Release / 候选 / PR | **未创建**，等待决定发布策略 |
+| preflight | 通过（仅 `backend/target` 构建产物提醒） |
+| `v0.5.3` Release | https://github.com/mjj3610/dbx-note/releases/tag/v0.5.3 （非 draft） |
+| 5 平台 CI | https://github.com/mjj3610/dbx-note/actions/runs/42562596951 — **success** |
+| 候选 JSON | 用 CI 的 `release-candidates.json` 生成，`make-store-candidate.mjs --validate` 只报预期「等待签名」 |
+| 商店 PR | https://github.com/t8y2/dbx-store/pull/486 — open，diff 只有 `candidates/com.mjj3610.note.json`（+59 行） |
+| 下一步 | 等维护者 `/sign` |
 
-发布前要先处理 #484：它仍是 0.5.2 的候选、open 且等签名。可选
-（a）等 #484 签名合并后再补一个 0.5.3 版本更新 PR；
-（b）关掉 #484，直接以 0.5.3 提交一个版本更新 PR（一次签名拿最新功能）；
-（c）暂不发版，只把代码推到 `main`。
-按「每次发布前重新查 PR 状态」的教训，动手前必须再查 #484 是否已被 `/sign`。
+用户选择「直接发 0.5.3」。按「每次发布前重新查 PR 状态」的教训，发布前重新查了 #484：
+`state=open / merged=false / 0 评论 / diff 仅候选文件 / validate 因等待签名失败`，
+确认**未被 `/sign`** 后才留言说明由 0.5.3 取代并关闭，避免同一插件同时出现两个 open 候选。
+`validate` 在 #486 上的失败同样已查工作流日志确认唯一错误是
+`com.mjj3610.note@0.5.3 awaiting DBX Store signing`。
 
 ## 关键认知
 
