@@ -5,26 +5,47 @@
 | 项 | 值 |
 | --- | --- |
 | 已上架版本 | `com.mjj3610.note` **v0.5.4**（#487 已被维护者签名并合并；上游 `plugins/com.mjj3610.note.json` 的 source 已指向 `tree/v0.5.4`） |
-| 版本更新 PR | 0.5.4 的 https://github.com/t8y2/dbx-store/pull/487 状态为 closed / merged=true（4 文件 +286 −38，含签名工作流写回的 `plugins/` 与 `catalog/`）；**当前没有 open 候选**，0.5.5 可直接提新 PR |
+| 待签名候选 | **v0.5.5** → https://github.com/t8y2/dbx-store/pull/490 （open，分支 `add-com.mjj3610.note-0.5.5`，diff 仅 `candidates/com.mjj3610.note.json` +59 行） |
 | 候选包 | 5 个平台，见下表 |
-| 源码 | https://github.com/mjj3610/dbx-note/tree/v0.5.4 |
-| Release | https://github.com/mjj3610/dbx-note/releases/tag/v0.5.4 （CI run 42573285429，一次通过，5 平台） |
-| PR 校验 | 0.5.4 提 PR 时 `validate` 失败是**签名前预期**：唯一错误是 `Catalog contains 1 open candidate(s) awaiting DBX Store signing: com.mjj3610.note@0.5.4`；维护者 `/sign` 后已合并 |
-| 旧 PR | #486（0.5.3）、#484（0.5.2）复核后均已关闭；#487（0.5.4）已签名合并。当前**没有需要关闭的 open 候选** |
-| 待办 | v0.5.5 已开发完成、等待发布；发布后新 PR 仍需等维护者审核并评论 `/sign` |
+| 源码 | https://github.com/mjj3610/dbx-note/tree/v0.5.5 |
+| Release | https://github.com/mjj3610/dbx-note/releases/tag/v0.5.5 （CI run 42624326811，completed / success，6 个 assets = 5 个 `.dbxp` + `release-candidates.json`） |
+| PR 校验 | #490 的 `validate` 为 failure 属**签名前预期**：唯一错误是 `Catalog contains 1 open candidate(s) awaiting DBX Store signing: com.mjj3610.note@0.5.5`；check-run 里其余都是 localization warning。维护者 `/sign` 后写入 `plugins/` 与 `catalog/` 即会通过 |
+| 旧 PR | #469（0.5.0）、#487（0.5.4）已签名合并；#484（0.5.2）、#486（0.5.3）复核后已关闭未合并。提 #490 前重新查过上游 open PR，**无本插件 open 候选**，无需先关旧 PR |
+| 待办 | 等维护者审核 #490 并评论 `/sign`；签名合并后把本表「已上架版本」改成 0.5.5 |
 
 候选包指纹（全部来自 CI 的 `release-candidates.json`，未签名）：
 
 | target | sha256 | size |
 | --- | --- | --- |
-| `windows-x64` | `4962a7d3bd60c991280227b5dc23d64884ae16b41cd93c7a295b0002556b06b3` | 3,783,834 |
-| `darwin-arm64` | `7031aaa9573322a0e0bf9a69f0bc55e8b124821ca0202a4840210dd8d95b4052` | 3,585,188 |
-| `darwin-x64` | `dbb4042594dce5c2c1c0e5d21c4c0273698a2520a2967a2d8ce0c73c787bd2d5` | 3,726,483 |
-| `linux-arm64` | `bdbccaa6da29218c22b360635c109d6bff9eaa5563fdbd598bd7e0ea45c5ed8e` | 3,659,650 |
-| `linux-x64` | `41351a6d148c7396a1acb28c95df3238780c7df5f5bd03e0749850b98f31ed49` | 3,725,682 |
+| `windows-x64` | `61cef2007f56d68f26b2e413c291f3e06ff261ff91efc01aaffbcd863a6dcd23` | 3,845,314 |
+| `darwin-arm64` | `39d276847aaf3ec5028e1bb4cd35f1221ee2e9f5b2b5475450883e2bb801d0ff` | 3,642,810 |
+| `darwin-x64` | `fcf04fb1f2d7e4413ab3dd1b4a6732d67193293d8ba4279a299aa320f0e41fe0` | 3,786,992 |
+| `linux-arm64` | `c2eb2b9584723613f19a8c9477620d797ef3a7d4fc9f1e81d81a3cc115adefea` | 3,718,538 |
+| `linux-x64` | `b2758e39f65d933773d34569b3b62394951299ecceb1d31db5fc461c6ac2bbee` | 3,787,040 |
 
-（上一版 0.5.3 的指纹见 `git show 2aac00e:store-submission/PUBLISH.md`，其 PR #486 已关闭未合并；
+（上一版 0.5.4 的指纹见 `git show 6b99320:store-submission/PUBLISH.md`，其 PR #487 已签名合并；
+0.5.3 指纹见 `git show 2aac00e:store-submission/PUBLISH.md`，其 PR #486 已关闭未合并；
 0.5.2 指纹见 `git show 0cc03ef:store-submission/PUBLISH.md`。）
+
+### v0.5.5 发布要点
+
+- 用户三张截图反馈：参考项目文件树「更多」菜单 / 右键菜单仍有缺失；底栏四种导出点击后都产出 HTML；
+  系统「另存为」窗口弹在软件下面。
+- 导出修复：`GetSaveFileNameW` 固定 `nFilterIndex = 1`，`sanitize_export_name()` 先剥旧后缀、
+  `normalize_export_path()` 按目标格式重建后缀；PDF 改走顶层 `window.open()` 打印，被宿主禁用时
+  降级为明确命名的 `*.print.html` 并给出提示，不再伪装成普通 HTML 导出。
+- 置顶修复：`focus_host()` + `GetForegroundWindow()` 作为 `hwndOwner`，`OFN_ENABLEHOOK` 在
+  `WM_INITDIALOG` 里 `SetWindowPos(HWND_TOPMOST)` / `BringWindowToTop()` / `SetForegroundWindow()`。
+- 文件树补齐：`FileMoreMenu.tsx`（排序 / 折叠 / 资源文件夹 / 知识库状态 / 远程文件 / 导入
+  笔记、Markdown、Notion zip）、右键菜单与 F2 / Del / Ctrl+X/C/V 快捷键、视图偏好持久化；
+  参考项目的远端向量索引等价映射为工作区 `.dbx-note/kb-index.json` 快照。
+- 回归：cargo release build ✓、后端测试二进制 5/0、tsc 0、vite ✓、**Sidecar 187/0**、
+  **smoke 12/0**、preflight ✓；e2e 完整一轮 286/8，本版新增 15 条断言全通过，
+  8 项为与改动无关的本机时序抖动，用户确认「按现状发布」。详见 `docs/release-notes-v0.5.5.md`。
+- 发布链路：`release-api.mjs` 建非 draft Release → CI run `42624326811` success →
+  现拉上游 tarball 到 `.tmp/dbx-store-055`（当时 `plugins/` 仍是 0.5.4）→
+  `make-store-candidate.mjs --candidates .tmp/release-candidates.json --store .tmp/dbx-store-055 --validate`
+  → `.tmp/store-pr-055.mjs` 提 #490（脚本带 open 候选守卫与候选自检）。
 
 ### v0.5.4 发布要点
 
