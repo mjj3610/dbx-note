@@ -141,6 +141,31 @@ function seedWorkspace() {
 }
 seedWorkspace()
 
+/**
+ * 上一轮 e2e 末尾会把图床切到 PicGo 并写进 app.settings；复用同一数据目录时，
+ * 画布插图会去连 36677（本机没起 PicGo）而整条链路失败。启动前归一到 local，
+ * 保证每次回归从干净状态开始，且不影响后面「切到 PicGo 图床生效」那条用例。
+ */
+async function resetImageHosting() {
+  const call = async (method, params) => {
+    const response = await fetch('http://127.0.0.1:5196/rpc', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ method, params }),
+    })
+    const payload = await response.json()
+    if (payload.error) throw new Error(payload.error.message)
+    return payload.result
+  }
+  const stored = await call('settings/get', { key: 'app.settings' })
+  const settings = stored?.value
+  if (!settings || typeof settings !== 'object' || settings.imageHosting?.provider === 'local') return
+  settings.imageHosting = { ...(settings.imageHosting ?? {}), provider: 'local' }
+  await call('settings/set', { key: 'app.settings', value: settings })
+  console.log('  （已把上轮残留的图床设置归一为 local）')
+}
+await resetImageHosting()
+
 const browser = await chromium.launch(existsSync(CHROMIUM) ? { executablePath: CHROMIUM } : {})
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, locale: 'zh-CN' })
 page.on('console', (message) => {
@@ -330,7 +355,11 @@ const providerCard = page.locator('[data-provider-card]').last()
 await providerCard.locator('input[aria-label="服务地址"]').fill('http://127.0.0.1:5199/v1')
 await providerCard.locator('input[aria-label="API Key"]').fill('test-key')
 await providerCard.getByRole('button', { name: '测试连接' }).click()
-await page.waitForTimeout(1500)
+await providerCard
+  .locator('button', { hasText: 'mock-note-model' })
+  .first()
+  .waitFor({ state: 'visible', timeout: 15_000 })
+  .catch(() => {})
 check(
   '拉取到可选模型',
   (await providerCard.locator('button', { hasText: 'mock-note-model' }).count()) > 0,
@@ -740,7 +769,12 @@ writeFileSync(
 const canvasAssetsDir = join(WORKSPACE, 'assets')
 const canvasAssetsBefore = existsSync(canvasAssetsDir) ? readdirSync(canvasAssetsDir).length : 0
 await page.locator('[data-canvas-image-input]').setInputFiles(uploadPng)
-await page.waitForTimeout(1600)
+await page
+  .locator('[data-canvas-kind="image"]')
+  .first()
+  .waitFor({ state: 'visible', timeout: 15_000 })
+  .catch(() => {})
+await page.waitForTimeout(400)
 check('插入图片节点', (await page.locator('[data-canvas-kind="image"]').count()) === 1)
 check(
   '图片已落盘到资产目录',
