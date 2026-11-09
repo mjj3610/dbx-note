@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   Check,
   ChevronRight,
@@ -84,49 +84,57 @@ const S3_PRESETS: ObjectStoragePreset[] = [
 export function ImageHostingSection() {
   const t = useT()
   const hosting = useSettingsStore((state) => state.imageHosting)
-  const patchHosting = useSettingsStore((state) => state.patchHosting)
   const [section, setSection] = useState<ImageProvider>(hosting.provider)
   const [state, setState] = useState<'idle' | 'checking' | 'ok' | 'fail'>('idle')
   const [message, setMessage] = useState('')
   const [info, setInfo] = useState<Record<string, unknown>>({})
   const [busy, setBusy] = useState(false)
+  /**
+   * 连接检测请求序号。切平台时会自动检测一次，用户改完地址又会手动点一次；
+   * 后端较慢时，先发的那次（通常是默认地址、必然失败）可能后回来，把「已连接」
+   * 覆盖成「未连接」，导致「使用此服务」按钮重新变灰。只允许最后一次请求写状态。
+   */
+  const checkSeq = useRef(0)
 
   const current = hosting.provider
   const provider = section
 
-  const runCheck = useCallback(
-    async (target: ImageProvider) => {
-      if (target === 'local') return
-      setState('checking')
-      setMessage('')
-      try {
-        const result = await rpc.imageHostingCheck({ ...hosting, provider: target })
-        setState(result.ok ? 'ok' : 'fail')
-        setMessage(result.message)
-        setInfo(result.info ?? {})
-      } catch (error) {
-        setState('fail')
-        setMessage(error instanceof Error ? error.message : String(error))
-      }
-    },
-    [hosting],
-  )
+  const runCheck = useCallback(async (target: ImageProvider) => {
+    const seq = ++checkSeq.current
+    if (target === 'local') return
+    setState('checking')
+    setMessage('')
+    try {
+      // 从 store 读实时配置：用户刚填完地址就点检测时，闭包里的 hosting 可能还是旧值
+      const config = { ...useSettingsStore.getState().imageHosting, provider: target }
+      const result = await rpc.imageHostingCheck(config)
+      if (seq !== checkSeq.current) return
+      setState(result.ok ? 'ok' : 'fail')
+      setMessage(result.message)
+      setInfo(result.info ?? {})
+    } catch (error) {
+      if (seq !== checkSeq.current) return
+      setState('fail')
+      setMessage(error instanceof Error ? error.message : String(error))
+    }
+  }, [])
 
   // 切到某个图床时自动检测一次，让状态徽标真实反映配置
   useEffect(() => {
+    // 先作废在飞请求（切到「本地存储」时尤其重要，那里不会再发新请求）
+    checkSeq.current += 1
     setState('idle')
     setMessage('')
     setInfo({})
     if (section === 'local') return
     void runCheck(section)
-    // 只在切换平台时检测，避免每次输入都打网络
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [section])
+  }, [section, runCheck])
 
   const useProvider = async (target: ImageProvider) => {
     setBusy(true)
     try {
-      useSettingsStore.getState().patch({ imageHosting: { ...hosting, provider: target } })
+      const latest = useSettingsStore.getState().imageHosting
+      useSettingsStore.getState().patch({ imageHosting: { ...latest, provider: target } })
       toast.success(t('toast.saved'))
     } finally {
       setBusy(false)

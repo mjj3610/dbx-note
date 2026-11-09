@@ -1797,15 +1797,21 @@ await page.waitForTimeout(400)
 // 改完地址要显式点「测试连接」：进页面时那次自动检测用的是默认 36677，会失败
 await page.getByRole('button', { name: '测试连接' }).first().click()
 await page.waitForTimeout(800)
-// 检测通过之后「使用此服务」才可点
+// 检测通过之后「使用此服务」才可点。全流程跑到这里时后端还在处理前面的请求，
+// 自动检测 / 手动检测可能交错，所以等不到「已连接」就补点一次检测再等。
 const picgoUse = page.getByRole('button', { name: '使用此服务' })
 for (let attempt = 0; attempt < 30; attempt += 1) {
   if ((await picgoUse.count()) > 0 && !(await picgoUse.isDisabled())) break
+  if (attempt === 4 || attempt === 10 || attempt === 18) {
+    await page.getByRole('button', { name: '测试连接' }).first().click().catch(() => {})
+  }
   await page.waitForTimeout(400)
 }
 if ((await picgoUse.count()) > 0 && !(await picgoUse.isDisabled())) {
   await picgoUse.click()
   await page.waitForTimeout(600)
+} else if (process.env.DBX_NOTE_E2E_DEBUG) {
+  console.log('  [debug] PicGo 仍未连接：', (await page.getByRole('dialog').innerText()).slice(-280))
 }
 // 以磁盘上真正保存的 provider 为准：按钮文案容易和左边页签选中混淆
 let savedProvider = ''
