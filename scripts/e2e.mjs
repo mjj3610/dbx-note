@@ -1258,9 +1258,10 @@ check(
   (await page.locator('[data-sync-platform="gitee"]').getAttribute('aria-pressed')) === 'true',
 )
 const autoCommit = page.getByRole('switch', { name: '自动提交' })
-if ((await autoCommit.getAttribute('aria-checked')) !== 'true') {
+for (let attempt = 0; attempt < 4; attempt += 1) {
+  if ((await autoCommit.getAttribute('aria-checked')) === 'true') break
   await autoCommit.click()
-  await page.waitForTimeout(800)
+  await page.waitForTimeout(700)
 }
 check('自动提交开关可开启', (await autoCommit.getAttribute('aria-checked')) === 'true')
 
@@ -1283,7 +1284,12 @@ check('提交信息模板已保存', (await templateInput.inputValue()) === 'not
 // 对象存储 / WebDAV / 自托管：配置表单真的能填能存
 // 「服务地址」「Secret Access Key」等标签在别的设置页也有同名项，全部限定在同步面板内
 const syncPanel = page.locator('[data-settings-panel="sync"]')
-await page.getByRole('dialog').getByRole('button', { name: '对象存储（S3）' }).click()
+// 上一步保存的 toast 可能盖住平台按钮，且切页签要异步重建表单；失败就重试点击
+for (let attempt = 0; attempt < 4; attempt += 1) {
+  await page.getByRole('dialog').getByRole('button', { name: '对象存储（S3）' }).click()
+  if ((await syncPanel.getByLabel('存储桶').count()) > 0) break
+  await page.waitForTimeout(700)
+}
 // 同步页签切换要读一次配置并重建表单，显式等控件出现，避免慢机器上固定等待误报
 await syncPanel.getByLabel('存储桶').first().waitFor({ state: 'visible', timeout: 15_000 })
 check('对象存储显示配置表单', (await syncPanel.getByLabel('存储桶').count()) === 1)
