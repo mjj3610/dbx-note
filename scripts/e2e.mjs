@@ -254,7 +254,8 @@ check('切回标签保留未保存前的改动', (await page.locator('.ProseMirr
 /* ---------- 图片设置面板（对齐 NoteGen 的 image-bubble-menu） ---------- */
 
 await page.locator('text=图片笔记').first().click()
-await page.waitForTimeout(800)
+// 图片经 Sidecar 读成 data URL 后再渲染，显式等 <img> 出现
+await page.locator('.ProseMirror img').first().waitFor({ state: 'visible', timeout: 15_000 }).catch(() => {})
 check('图片笔记里渲染出图片', (await page.locator('.ProseMirror img').count()) >= 1)
 
 const imageMenu = page.locator('[data-editor-image-menu]')
@@ -1258,20 +1259,22 @@ check(
   (await page.locator('[data-sync-platform="gitee"]').getAttribute('aria-pressed')) === 'true',
 )
 const autoCommit = page.getByRole('switch', { name: '自动提交' })
-for (let attempt = 0; attempt < 4; attempt += 1) {
+// saveOptions 会等 refresh()（syncStatus + syncOptions）跑完才回写开关并清 busy；
+// 慢机器上可能要好几秒，轮询等状态稳定，别在 busy 期间重复点击
+if ((await autoCommit.getAttribute('aria-checked')) !== 'true') await autoCommit.click()
+for (let attempt = 0; attempt < 30; attempt += 1) {
   if ((await autoCommit.getAttribute('aria-checked')) === 'true') break
-  await autoCommit.click()
-  await page.waitForTimeout(700)
+  await page.waitForTimeout(500)
 }
 check('自动提交开关可开启', (await autoCommit.getAttribute('aria-checked')) === 'true')
 
 await page.getByLabel('访问令牌').fill('e2e-token-123456')
-await page.waitForTimeout(200)
-await page
-  .locator('[data-token-row]')
-  .getByRole('button', { name: '保存' })
-  .click()
-await page.waitForTimeout(1000)
+const tokenSave = page.locator('[data-token-row]').getByRole('button', { name: '保存' })
+for (let attempt = 0; attempt < 30 && !(await tokenSave.isEnabled()); attempt += 1) {
+  await page.waitForTimeout(500)
+}
+await tokenSave.click()
+await page.waitForTimeout(1200)
 check('令牌保存后只显示掩码', (await page.getByLabel('访问令牌').inputValue()) === '')
 check('提示已保存的令牌', (await page.locator('text=已保存 e2e').count()) > 0)
 
