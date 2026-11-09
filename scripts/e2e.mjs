@@ -231,8 +231,14 @@ for (let attempt = 0; attempt < 6 && (await tabList.getByRole('tab').count()) < 
 await page.waitForTimeout(300)
 check('第二个文件追加标签', (await tabList.getByRole('tab').count()) === 2)
 await tabList.getByRole('tab', { name: /周会纪要/ }).click()
-await page.waitForTimeout(700)
-check('切换标签恢复上一篇正文', (await page.locator('.ProseMirror').innerText()).includes('本周完成'))
+// 切标签要读盘 + 重渲染编辑器，慢机器上 700ms 不够，轮询等正文回来
+let restoredText = ''
+for (let attempt = 0; attempt < 24; attempt += 1) {
+  restoredText = await page.locator('.ProseMirror').innerText().catch(() => '')
+  if (restoredText.includes('本周完成')) break
+  await page.waitForTimeout(400)
+}
+check('切换标签恢复上一篇正文', restoredText.includes('本周完成'))
 await page.screenshot({ path: join(SHOTS, '14-tabs.png') })
 await page.keyboard.press('Control+w')
 await page.waitForTimeout(800)
