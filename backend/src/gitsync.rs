@@ -173,6 +173,13 @@ fn parse_ls_tree(output: &str) -> BTreeMap<String, RemoteFile> {
 /// 由本机 credential helper / SSH key 处理，插件本身不落盘任何凭据。
 fn fetch_snapshot(app: &App) -> Result<Snapshot, RpcError> {
     let root = sync::root_of(app);
+    // 工作区没有自己的 .git 时，git 会一路向上找到外层仓库（例如插件源码仓库）；
+    // 那样会把别人的源码清单当成「远端笔记」拉进文件树，还会连到别人的 origin。
+    // 与 sync/status 用同一套判定：仓库根必须就是当前工作区。
+    let (has_top, toplevel, _) = sync::git(&root, &["rev-parse", "--show-toplevel"]);
+    if !has_top || !sync::same_path(&toplevel, &root) {
+        return Err(RpcError::invalid("当前工作区不是独立的 Git 仓库"));
+    }
     let (has_remote, remote, _) = sync::git(&root, &["remote", "get-url", "origin"]);
     if !has_remote || remote.trim().is_empty() {
         return Err(RpcError::invalid("还没有配置远端仓库"));
@@ -788,9 +795,9 @@ pub fn list_remote(app: &App) -> RpcResult {
         .and_then(Value::as_str)
         .unwrap_or("github")
         .to_string();
-    let (is_repo, _, _) = sync::git(&root, &["rev-parse", "--is-inside-work-tree"]);
+    let (has_top, toplevel, _) = sync::git(&root, &["rev-parse", "--show-toplevel"]);
     let (has_remote, remote, _) = sync::git(&root, &["remote", "get-url", "origin"]);
-    if !is_repo || !has_remote || remote.trim().is_empty() {
+    if !has_top || !sync::same_path(&toplevel, &root) || !has_remote || remote.trim().is_empty() {
         return Ok(json!({
             "configured": false,
             "offline": false,

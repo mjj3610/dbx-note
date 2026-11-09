@@ -642,6 +642,15 @@ async function main() {
     rmSync(peerDir, { recursive: true, force: true })
     git(['init', '--bare', originDir])
 
+    // 工作区还没有自己的 .git，但外层（插件源码目录）是一个 Git 仓库：
+    // 清单必须判定「未配置」，不能顺着 git 的向上查找把外层仓库当成同步仓库。
+    const beforeInit = await call('sync/remoteTree')
+    check(
+      '工作区非独立仓库时不会误读外层 Git 仓库',
+      beforeInit.configured === false,
+      JSON.stringify({ configured: beforeInit.configured, count: beforeInit.files?.length }),
+    )
+
     // 工作区当仓库，远端指向本地裸仓库（等价于 https 远端，只是不打网络）
     await call('sync/init', { url: originDir.replace(/\\/g, '/') })
     gitIdentity(WORKSPACE)

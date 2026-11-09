@@ -140,7 +140,7 @@ pub(crate) fn fail(detail: &str, fallback: &str) -> RpcError {
 ///
 /// git 在 Windows 上回的是 `D:/a/b` 这种正斜杠形式，盘符大小写也不稳定；
 /// 工作区根还可能是相对路径。因此先做字面归一比较，不等再各自 canonicalize 比一次。
-fn same_path(reported: &str, root: &Path) -> bool {
+pub(crate) fn same_path(reported: &str, root: &Path) -> bool {
     fn normalize(value: &str) -> String {
         value
             .replace('\\', "/")
