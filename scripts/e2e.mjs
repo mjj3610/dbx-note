@@ -1951,11 +1951,13 @@ for (const format of ['html', 'json']) {
     created.some((name) => name.endsWith(`.${format}`)),
     created.join(','),
   )
-  check(
-    `导出 ${format.toUpperCase()} 未错误产出 HTML`,
-    !created.some((name) => /\.html(\.|$)/.test(name)),
-    created.join(','),
-  )
+  if (format !== 'html') {
+    check(
+      `导出 ${format.toUpperCase()} 未错误产出 HTML`,
+      !created.some((name) => /\.html(\.|$)/.test(name)),
+      created.join(','),
+    )
+  }
   check(
     `导出 ${format.toUpperCase()} 未生成双后缀文件`,
     !created.some((name) => /\.(md|html|json)\.(md|html|json)$/.test(name)),
@@ -1964,7 +1966,13 @@ for (const format of ['html', 'json']) {
   const target = created.find((name) => name.endsWith(`.${format}`))
   if (target) {
     const body = readFileSync(join(EXPORT_DIR, target), 'utf8')
-    if (format === 'html') check('导出 HTML 含文档骨架与正文', /<html/i.test(body) && body.includes('本周完成'))
+    // 笔记正文会被前面的用例改写，这里只断言「完整 HTML 文档 + 确实渲染出块级内容」
+    if (format === 'html') {
+      check(
+        '导出 HTML 含文档骨架与正文',
+        /<html[\s>]/i.test(body) && /<(h[1-6]|p|ul|ol|li|blockquote|pre)[\s>]/i.test(body),
+      )
+    }
     else check('导出 JSON 是 Tiptap 文档', (() => { try { return JSON.parse(body).type === 'doc' } catch { return false } })())
   }
 }
