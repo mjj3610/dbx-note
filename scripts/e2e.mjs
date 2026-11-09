@@ -218,13 +218,17 @@ check('打开笔记显示正文', (await page.locator('.ProseMirror').innerText(
 
 // 多标签：打开第二篇 → 两个标签 → 切换 → Ctrl+W 关闭
 check('打开文件生成标签', (await tabList.getByRole('tab').count()) === 1)
-// 用文件树的数据钩子做确定性展开，别靠 400ms 猜状态或宽泛的 text= 匹配
+// 用文件树的数据钩子做确定性展开，别靠 400ms 猜状态或宽泛的 text= 匹配。
+// 冷启动时第一次点击可能被初始化流程吃掉，轮询到真的开出第二个标签为止。
 const projectNode = page.locator('[data-tree-node="项目"]')
 const planNode = page.locator('[data-tree-node="项目/规划.md"]')
-if ((await planNode.count()) === 0) await projectNode.first().click()
-await planNode.first().waitFor({ state: 'visible', timeout: 15_000 })
-await planNode.first().click()
-await page.waitForTimeout(800)
+for (let attempt = 0; attempt < 6 && (await tabList.getByRole('tab').count()) < 2; attempt += 1) {
+  if ((await planNode.count()) === 0) await projectNode.first().click()
+  await planNode.first().waitFor({ state: 'visible', timeout: 15_000 })
+  await planNode.first().click()
+  await page.waitForTimeout(700)
+}
+await page.waitForTimeout(300)
 check('第二个文件追加标签', (await tabList.getByRole('tab').count()) === 2)
 await tabList.getByRole('tab', { name: /周会纪要/ }).click()
 await page.waitForTimeout(700)
