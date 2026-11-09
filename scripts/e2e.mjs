@@ -1277,11 +1277,13 @@ await page.waitForTimeout(900)
 check('提交信息模板已保存', (await templateInput.inputValue()) === 'notes {date}')
 
 // 对象存储 / WebDAV / 自托管：配置表单真的能填能存
+// 「服务地址」「Secret Access Key」等标签在别的设置页也有同名项，全部限定在同步面板内
+const syncPanel = page.locator('[data-settings-panel="sync"]')
 await page.getByRole('dialog').getByRole('button', { name: '对象存储（S3）' }).click()
 // 同步页签切换要读一次配置并重建表单，显式等控件出现，避免慢机器上固定等待误报
-await page.getByLabel('存储桶').first().waitFor({ state: 'visible', timeout: 15_000 })
-check('对象存储显示配置表单', (await page.getByLabel('存储桶').count()) === 1)
-check('对象存储列出预设服务商', (await page.getByLabel('服务商').count()) === 1)
+await syncPanel.getByLabel('存储桶').first().waitFor({ state: 'visible', timeout: 15_000 })
+check('对象存储显示配置表单', (await syncPanel.getByLabel('存储桶').count()) === 1)
+check('对象存储列出预设服务商', (await syncPanel.getByLabel('服务商').count()) === 1)
 await page.getByLabel('存储桶').fill('e2e-bucket')
 await page.getByLabel('Access Key ID').fill('AKIAE2E')
 await page.getByLabel('Secret Access Key').fill('secret-e2e-value')
@@ -1291,11 +1293,15 @@ await page
   .getByRole('button', { name: '保存', exact: true })
   .click()
 await page.waitForTimeout(1400)
-check('对象存储配置已保存', (await page.getByLabel('存储桶').inputValue()) === 'e2e-bucket')
-check(
-  '同步密钥保存后只显示掩码',
-  (await page.getByLabel('Secret Access Key').inputValue()) === '',
-)
+check('对象存储配置已保存', (await syncPanel.getByLabel('存储桶').inputValue()) === 'e2e-bucket')
+// 保存后 Sidecar 会回读并把明文换成掩码，轮询等它落定，别用固定 1.4s 猜
+let secretPlain = ''
+for (let attempt = 0; attempt < 20; attempt += 1) {
+  secretPlain = await syncPanel.getByLabel('Secret Access Key').inputValue()
+  if (secretPlain === '') break
+  await page.waitForTimeout(300)
+}
+check('同步密钥保存后只显示掩码', secretPlain === '', secretPlain)
 check('显示同步状态卡片', (await page.locator('[data-store-status]').count()) === 1)
 // 换平台后同步选项要保留，且值不丢
 check('对象存储平台也显示同步选项', (await page.locator('[data-sync-note-options]').count()) === 1)
@@ -1307,11 +1313,11 @@ await page.screenshot({ path: join(SHOTS, '47-sync-options-store.png') })
 await page.screenshot({ path: join(SHOTS, '16-sync-store.png') })
 
 await page.getByRole('dialog').getByRole('button', { name: 'WebDAV', exact: true }).click()
-await page.getByLabel('WebDAV 目录地址').first().waitFor({ state: 'visible', timeout: 15_000 })
-check('WebDAV 显示目录地址表单', (await page.getByLabel('WebDAV 目录地址').count()) === 1)
+await syncPanel.getByLabel('WebDAV 目录地址').first().waitFor({ state: 'visible', timeout: 15_000 })
+check('WebDAV 显示目录地址表单', (await syncPanel.getByLabel('WebDAV 目录地址').count()) === 1)
 await page.getByRole('dialog').getByRole('button', { name: '自托管', exact: true }).click()
-await page.getByLabel('服务地址').first().waitFor({ state: 'visible', timeout: 15_000 })
-check('自托管显示服务地址表单', (await page.getByLabel('服务地址').count()) === 1)
+await syncPanel.getByLabel('服务地址').first().waitFor({ state: 'visible', timeout: 15_000 })
+check('自托管显示服务地址表单', (await syncPanel.getByLabel('服务地址').count()) === 1)
 check('自托管提供立即上传入口', (await page.getByRole('button', { name: '立即上传' }).count()) === 1)
 
 // 备份与恢复（独立设置页）
