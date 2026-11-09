@@ -231,14 +231,18 @@ mod win {
     /// 持有它，单次 `OpenClipboard` 会偶发失败。这里退避重试若干次再报错。
     unsafe fn open_clipboard() -> Result<(), String> {
         use windows_sys::Win32::System::DataExchange::OpenClipboard;
-        // 剪贴板是全局独占资源：剪贴板历史、输入法、别的截图工具都可能正握着它。
-        // 实测遇到过 300ms 内一直占用的情况，所以给到 ~1s 的退避再放弃。
-        for attempt in 0..25 {
+        /// 打开剪贴板的最大尝试次数（每次间隔 40ms，合计约 3s）
+        const CLIPBOARD_OPEN_RETRIES: u32 = 75;
+        /// 每次重试之间的等待时间
+        const CLIPBOARD_RETRY_DELAY_MS: u64 = 40;
+        // 剪贴板是全局独占资源：剪贴板历史、输入法、别的截图工具、以及同时运行的
+        // 其它版本插件 Sidecar 都可能正握着它。成功时立即返回，只有争用才付出等待。
+        for attempt in 0..CLIPBOARD_OPEN_RETRIES {
             if OpenClipboard(std::ptr::null_mut()) != 0 {
                 return Ok(());
             }
-            if attempt < 24 {
-                std::thread::sleep(std::time::Duration::from_millis(40));
+            if attempt + 1 < CLIPBOARD_OPEN_RETRIES {
+                std::thread::sleep(std::time::Duration::from_millis(CLIPBOARD_RETRY_DELAY_MS));
             }
         }
         Err("剪贴板被其他程序占用，请稍后重试".into())

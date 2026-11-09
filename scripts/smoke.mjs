@@ -88,10 +88,11 @@ await page.waitForTimeout(900)
 check('记录已创建', (await page.locator('text=明天整理插件文档').count()) > 0)
 await page.screenshot({ path: join(SHOTS, '03-records.png') })
 
-// 大纲
-await page.getByRole('button', { name: '大纲' }).click()
+// 大纲：底栏也有同名「大纲」按钮，这里显式限定到左侧栏页签，避免 strict mode 歧义
+await page.locator('.sidebar-tabs').getByRole('button', { name: '大纲' }).click()
 await page.waitForTimeout(400)
 check('大纲识别标题', (await page.locator('text=二级标题').count()) > 0)
+check('编辑器底栏可见', await page.locator('[data-editor-footer]').isVisible())
 
 // 设置
 await page.getByRole('button', { name: '设置' }).click()

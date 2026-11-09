@@ -365,7 +365,20 @@ pub fn write_file(app: &App, params: &Value) -> RpcResult {
         file.sync_all()?;
     }
     fs::rename(&temp, &path)?;
-    Ok(json!({ "path": relative_path(&root, &path), "size": content.len() }))
+
+    // 历史版本：只对笔记文件留快照。快照是增强能力，写失败不能影响正常保存。
+    let rel = relative_path(&root, &path);
+    let extension = path
+        .extension()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_ascii_lowercase();
+    if TEXT_EXTENSIONS.contains(&extension.as_str()) {
+        if let Err(error) = crate::db::history_push(app, &rel, &content, false) {
+            crate::logln!("[dbx-note] 历史版本快照写入失败（不影响保存）：path={rel} error={error:?}");
+        }
+    }
+    Ok(json!({ "path": rel, "size": content.len() }))
 }
 
 pub fn create_entry(app: &App, params: &Value) -> RpcResult {

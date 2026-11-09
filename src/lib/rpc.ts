@@ -186,6 +186,39 @@ export function writeFile(path: string, content: string): Promise<{ path: string
   return call('fs/write', { path, content }, WRITE_TIMEOUT)
 }
 
+/* ---------------- 笔记历史版本 ---------------- */
+
+/** 历史版本列表项：只含元信息，正文按需用 `historyGet()` 取 */
+export interface HistoryItem {
+  id: number
+  preview: string
+  size: number
+  createdAt: number
+}
+
+/** 单个历史版本的完整正文 */
+export interface HistoryVersion {
+  id: number
+  path: string
+  content: string
+  createdAt: number
+}
+
+/** 列出某篇笔记的历史版本（按时间倒序） */
+export function historyList(path: string, limit = 20): Promise<{ items: HistoryItem[] }> {
+  return call('history/list', { path, limit })
+}
+
+/** 取某个历史版本的完整正文，用于预览与恢复 */
+export function historyGet(id: number): Promise<HistoryVersion> {
+  return call('history/get', { id })
+}
+
+/** 手动把当前内容存成一个版本；与上一条内容相同时返回 created=false */
+export function historyCreate(path: string, content: string): Promise<{ created: boolean }> {
+  return call('history/create', { path, content }, WRITE_TIMEOUT)
+}
+
 export function createEntry(params: {
   kind: 'file' | 'folder'
   parent: string

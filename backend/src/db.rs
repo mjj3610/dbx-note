@@ -7,7 +7,11 @@
 //! - record_tags     记录与标签的多对多关系
 //! - chats           会话：title 为空时由首条消息自动生成
 //! - messages        消息：role ∈ user/assistant/system
-//! - file_history    笔记快照：保存前留档，便于回滚
+//! - file_history    笔记版本快照：每次保存留档，供「历史版本」预览与回滚
+//!   - path          工作区相对路径（NOT NULL，与 fs/* 的路径口径一致）
+//!   - content       该版本的完整 Markdown 正文（NOT NULL，不做压缩）
+//!   - created_at    写入时刻的毫秒时间戳（NOT NULL，索引按它倒序）
+//!   - 单文件最多保留 `HISTORY_MAX_PER_FILE` 条，超出自动清理最旧的
 
 use std::path::Path;
 
@@ -16,6 +20,13 @@ use serde_json::{json, Value};
 use uuid::Uuid;
 
 use crate::{now_ms, param_i64, param_str, App, RpcError, RpcResult};
+
+/// 单个笔记最多保留的历史版本数（防止长期自动保存把数据库撑大）
+const HISTORY_MAX_PER_FILE: i64 = 50;
+/// 自动快照最小间隔（毫秒）：自动保存是防抖的，不能把每次按键都记成一个版本
+const HISTORY_MIN_INTERVAL_MS: i64 = 60_000;
+/// 历史列表里预览文本的最大字符数
+const HISTORY_PREVIEW_CHARS: usize = 80;
 
 /// 打开（并初始化）数据库
 pub fn open(path: &Path) -> rusqlite::Result<Connection> {
@@ -485,20 +496,86 @@ pub fn settings_set(app: &App, params: &Value) -> RpcResult {
     Ok(json!({ "ok": true }))
 }
 
-/* ---------------- 文件历史 ---------------- */
+/* ---------------- 文件历史版本 ---------------- */
 
+/**
+ * 列表预览：把 Markdown 前 200 字符压成单行，避免把整篇正文读进内存。
+ * @param raw SQL `substr(content,1,200)` 的结果
+ * @return 最多 `HISTORY_PREVIEW_CHARS` 个字符的单行摘要
+ */
+fn history_preview(raw: &str) -> String {
+    let collapsed = raw.split_whitespace().collect::<Vec<_>>().join(" ");
+    collapsed.chars().take(HISTORY_PREVIEW_CHARS).collect()
+}
+
+/**
+ * 写入一条笔记版本快照。
+ *
+ * 自动保存（`force=false`）带三重收口：空内容不记、与上一条内容相同不记、
+ * 距上一条不足 `HISTORY_MIN_INTERVAL_MS` 不记；手动「保存当前版本」跳过时间节流。
+ * 每次成功写入后把该文件裁到最近 `HISTORY_MAX_PER_FILE` 条。
+ *
+ * @param app   运行期状态（持有 SQLite 连接）
+ * @param path  工作区相对路径
+ * @param content 本次落盘的完整 Markdown
+ * @param force 是否为用户主动创建的版本
+ * @return 是否真的新增了一条记录
+ */
+pub fn history_push(app: &App, path: &str, content: &str, force: bool) -> Result<bool, RpcError> {
+    if path.is_empty() || content.is_empty() {
+        return Ok(false);
+    }
+    let conn = app.db.lock().map_err(|_| RpcError::internal("数据库繁忙"))?;
+
+    // 只跟该文件最近一条比较：内容去重已经能挡住绝大多数防抖保存
+    let last: Option<(String, i64)> = conn
+        .query_row(
+            "SELECT content, created_at FROM file_history
+             WHERE path = ?1 ORDER BY created_at DESC, id DESC LIMIT 1",
+            params![path],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()?;
+    if let Some((previous, created_at)) = last {
+        if previous == content {
+            return Ok(false);
+        }
+        if !force && now_ms().saturating_sub(created_at) < HISTORY_MIN_INTERVAL_MS {
+            return Ok(false);
+        }
+    }
+
+    conn.execute(
+        "INSERT INTO file_history (path, content, created_at) VALUES (?1, ?2, ?3)",
+        params![path, content, now_ms()],
+    )?;
+    conn.execute(
+        "DELETE FROM file_history WHERE path = ?1 AND id NOT IN (
+             SELECT id FROM file_history WHERE path = ?1
+             ORDER BY created_at DESC, id DESC LIMIT ?2
+         )",
+        params![path, HISTORY_MAX_PER_FILE],
+    )?;
+    Ok(true)
+}
+
+/** `history/list`：按路径倒序列出版本元信息（不含正文，正文走 `history/get`） */
 pub fn history_list(app: &App, params: &Value) -> RpcResult {
     let conn = app.db.lock().map_err(|_| RpcError::internal("数据库繁忙"))?;
     let path = param_str(params, "path");
     let limit = param_i64(params, "limit", 20).clamp(1, 100);
     let mut stmt = conn.prepare(
-        "SELECT id, content, created_at FROM file_history WHERE path = ? ORDER BY created_at DESC LIMIT ?",
+        "SELECT id, substr(content, 1, 200), length(content), created_at
+         FROM file_history WHERE path = ?1
+         ORDER BY created_at DESC, id DESC LIMIT ?2",
     )?;
     let rows = stmt.query_map(params![path, limit], |row| {
+        let preview: String = row.get(1)?;
         Ok(json!({
             "id": row.get::<_, i64>(0)?,
-            "content": row.get::<_, String>(1)?,
-            "createdAt": row.get::<_, i64>(2)?,
+            "preview": history_preview(&preview),
+            "size": row.get::<_, i64>(2)?,
+            "createdAt": row.get::<_, i64>(3)?,
         }))
     })?;
     let mut items = Vec::new();
@@ -506,4 +583,37 @@ pub fn history_list(app: &App, params: &Value) -> RpcResult {
         items.push(row?);
     }
     Ok(json!({ "items": items }))
+}
+
+/** `history/get`：按 id 取某个版本的完整正文，供预览与恢复 */
+pub fn history_get(app: &App, params: &Value) -> RpcResult {
+    let id = param_i64(params, "id", 0);
+    if id <= 0 {
+        return Err(RpcError::invalid("历史版本 id 无效"));
+    }
+    let conn = app.db.lock().map_err(|_| RpcError::internal("数据库繁忙"))?;
+    let row: Option<(String, String, i64)> = conn
+        .query_row(
+            "SELECT path, content, created_at FROM file_history WHERE id = ?1",
+            params![id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .optional()?;
+    match row {
+        Some((path, content, created_at)) => Ok(json!({
+            "id": id, "path": path, "content": content, "createdAt": created_at,
+        })),
+        None => Err(RpcError::invalid("历史版本不存在或已被清理")),
+    }
+}
+
+/** `history/create`：用户在面板里主动「保存当前版本」，跳过时间节流但仍做内容去重 */
+pub fn history_create(app: &App, params: &Value) -> RpcResult {
+    let path = param_str(params, "path");
+    let content = param_str(params, "content");
+    if path.is_empty() {
+        return Err(RpcError::invalid("缺少笔记路径"));
+    }
+    let created = history_push(app, &path, &content, true)?;
+    Ok(json!({ "created": created }))
 }

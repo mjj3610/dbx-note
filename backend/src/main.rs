@@ -66,7 +66,7 @@ use serde_json::{json, Value};
 
 /// 插件标识与版本，必须与 manifest.json 保持一致
 const PLUGIN_ID: &str = "com.mjj3610.note";
-pub(crate) const PLUGIN_VERSION: &str = "0.5.2";
+pub(crate) const PLUGIN_VERSION: &str = "0.5.3";
 /// 协议版本
 const PROTOCOL_VERSION: i64 = 1;
 
@@ -419,6 +419,8 @@ fn dispatch(app: &App, method: &str, params: Value) -> RpcResult {
         "settings/get" => db::settings_get(app, &params),
         "settings/set" => db::settings_set(app, &params),
         "history/list" => db::history_list(app, &params),
+        "history/get" => db::history_get(app, &params),
+        "history/create" => db::history_create(app, &params),
 
         // ---------------- AI ----------------
         "ai/chat" => ai::chat(app, &params),

@@ -28,6 +28,7 @@ import { toggleSidePane } from '@/lib/split'
 import { useNotesStore } from '@/stores/notes'
 import { useSettingsStore } from '@/stores/settings'
 import { useUiStore } from '@/stores/ui'
+import { EditorFooterBar } from './EditorFooterBar'
 import { EditorMetaBar } from './EditorMetaBar'
 import { EditorTabBar } from './EditorTabBar'
 import { MarkdownEditor } from './MarkdownEditor'
@@ -259,6 +260,7 @@ export function EditorPane() {
         )}
       </div>
 
+      <EditorFooterBar />
     </div>
   )
 }

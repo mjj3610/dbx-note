@@ -1889,6 +1889,66 @@ await page.screenshot({ path: join(SHOTS, '58-screenshot-record.png') })
 await page.getByRole('button', { name: '文件', exact: true }).first().click()
 await page.waitForTimeout(500)
 
+/* ---------- 编辑器底栏：复制 / 导出 / 历史版本 ---------- */
+
+// 先确保编辑器里有打开的笔记，底栏只在有 activePath 时渲染
+if ((await tabList.getByRole('tab').count()) > 0) {
+  await tabList.getByRole('tab').first().click()
+} else {
+  await page.locator('text=周会纪要').first().click()
+}
+await page.waitForTimeout(700)
+check('编辑器底栏可见', await page.locator('[data-editor-footer]').isVisible())
+check('底栏提供复制 / 导出 / 历史版本', (await page.locator('[data-footer-copy]').count()) === 1
+  && (await page.locator('[data-footer-export]').count()) === 1
+  && (await page.locator('[data-footer-history]').count()) === 1)
+check('底栏显示字符数', (await page.locator('[data-footer-chars]').innerText()).includes('字符'))
+
+// 复制：4 种格式齐全，点 Markdown 后给出「已复制」反馈
+await page.locator('[data-footer-copy]').click()
+await page.waitForTimeout(300)
+check('复制菜单含 4 种格式', (await page.locator('[data-copy-format]').count()) === 4)
+await page.locator('[data-copy-format="markdown"]').click()
+await page.waitForTimeout(500)
+check(
+  '复制 Markdown 给出反馈',
+  (await page.locator('[data-sonner-toast]').allInnerTexts()).some((text) => text.includes('已复制')),
+)
+
+// 导出：4 种格式齐全，点 Markdown 后给出「已导出」反馈（下载由浏览器接管，不阻塞）
+await page.locator('[data-footer-export]').click()
+await page.waitForTimeout(300)
+check('导出菜单含 4 种格式', (await page.locator('[data-export-format]').count()) === 4)
+await page.locator('[data-export-format="markdown"]').click()
+await page.waitForTimeout(600)
+check(
+  '导出 Markdown 给出反馈',
+  (await page.locator('[data-sonner-toast]').allInnerTexts()).some((text) => text.includes('已导出')),
+)
+
+// 历史版本：面板可开、能建版本、有列表、可预览、恢复前弹二次确认且可取消
+await page.locator('[data-footer-history]').click()
+await page.waitForTimeout(700)
+check('历史版本面板可打开', await page.locator('[data-history-create]').isVisible())
+await page.locator('[data-history-create]').click()
+await page.waitForTimeout(800)
+check('历史版本列表有记录', (await page.locator('[data-history-item]').count()) >= 1)
+await page.locator('[data-history-preview]').first().click()
+await page.waitForTimeout(700)
+check('历史版本可预览正文', (await page.getByRole('dialog').locator('pre').innerText()).length > 0)
+await page.getByRole('dialog').getByRole('button', { name: '恢复此版本' }).click()
+await page.waitForTimeout(500)
+check(
+  '恢复历史版本前弹出二次确认',
+  (await page.getByRole('button', { name: '确认恢复' }).count()) === 1
+    && (await page.getByRole('button', { name: '取消' }).count()) >= 1,
+)
+await page.getByRole('button', { name: '取消' }).last().click()
+await page.waitForTimeout(400)
+check('取消恢复后确认框关闭', (await page.getByRole('button', { name: '确认恢复' }).count()) === 0)
+await page.keyboard.press('Escape')
+await page.waitForTimeout(300)
+
 /* ---------- 知识库 / 记忆 ---------- */
 
 await settingsButton().click()
