@@ -70,7 +70,7 @@ fn parse_remote(raw: &str) -> Option<(String, String, String)> {
             .strip_prefix("https://")
             .or_else(|| url.strip_prefix("http://"))?;
         let (authority, path) = rest.split_once('/')?;
-        // `https://oauth2:TOKEN@github.com/...` 里的凭据不参与链接拼接
+        // `https://oauth2:xxxxx@example.com/...` 这类带 userinfo 的 URL，凭据不参与链接拼接
         let host = authority.rsplit('@').next().unwrap_or(authority);
         (format!("https://{host}"), path.to_string())
     };
