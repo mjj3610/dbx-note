@@ -514,6 +514,95 @@ mod win {
         }
         Ok((width as u32, height as u32, rgba))
     }
+
+    /// 弹系统「另存为」对话框，用户选定路径后写入导出正文。
+    ///
+    /// 参考项目用 Tauri 的 `save()` + `writeTextFile()`；本项目是 Win32 Sidecar，
+    /// 等价映射到 `GetSaveFileNameW` + `std::fs::write`，语义一致：用户自己选路径、
+    /// 可取消、取消时不写盘。
+    ///
+    /// @param default_name 对话框默认文件名（已净化，不含目录）
+    /// @param extension    目标扩展名（白名单内），用于过滤器与自动补后缀
+    /// @param filter_name  过滤器显示名
+    /// @param content      待写盘的 UTF-8 正文
+    /// @return 确认时返回实际保存路径；取消返回 `None`
+    pub fn save_text_dialog(
+        default_name: &str,
+        extension: &str,
+        filter_name: &str,
+        content: &str,
+    ) -> Result<Option<String>, String> {
+        use std::os::windows::ffi::OsStrExt;
+        use windows_sys::Win32::System::Com::{
+            CoInitializeEx, CoUninitialize, COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE,
+        };
+        use windows_sys::Win32::UI::Controls::Dialogs::{
+            GetSaveFileNameW, OFN_EXPLORER, OFN_NOCHANGEDIR, OFN_OVERWRITEPROMPT,
+            OFN_PATHMUSTEXIST, OPENFILENAMEW,
+        };
+
+        let mut file: Vec<u16> = default_name
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect();
+        // 缓冲区要留足：系统会把用户选定的完整路径写回来
+        file.resize(1024, 0);
+        let filter: Vec<u16> = format!("{filter_name}\0*.{extension}\0所有文件\0*.*\0\0")
+            .encode_utf16()
+            .collect();
+        let ext: Vec<u16> = extension.encode_utf16().chain(std::iter::once(0)).collect();
+        let title: Vec<u16> = "导出\0".encode_utf16().collect();
+        let downloads = std::env::var_os("USERPROFILE").map(|home| {
+            std::path::Path::new(&home)
+                .join("Downloads")
+                .as_os_str()
+                .encode_wide()
+                .chain(std::iter::once(0))
+                .collect::<Vec<u16>>()
+        });
+
+        let mut ofn: OPENFILENAMEW = unsafe { std::mem::zeroed() };
+        ofn.lStructSize = std::mem::size_of::<OPENFILENAMEW>() as u32;
+        ofn.hwndOwner = std::ptr::null_mut();
+        ofn.lpstrFilter = filter.as_ptr();
+        ofn.lpstrFile = file.as_mut_ptr();
+        ofn.nMaxFile = file.len() as u32;
+        ofn.lpstrDefExt = ext.as_ptr();
+        ofn.lpstrTitle = title.as_ptr();
+        if let Some(dir) = downloads.as_ref() {
+            ofn.lpstrInitialDir = dir.as_ptr();
+        }
+        ofn.Flags = OFN_EXPLORER | OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
+
+        // Vista 之后 GetSaveFileName 内部就是 IFileDialog，线程未初始化 COM 会静默返回 0
+        let hr = unsafe {
+            CoInitializeEx(
+                std::ptr::null(),
+                (COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE) as u32,
+            )
+        };
+        let com_ready = hr >= 0;
+        let ok = unsafe { GetSaveFileNameW(&mut ofn) };
+        if com_ready {
+            unsafe { CoUninitialize() };
+        }
+        if ok == 0 {
+            return Ok(None);
+        }
+
+        let end = file.iter().position(|unit| *unit == 0).unwrap_or(file.len());
+        let mut path = String::from_utf16_lossy(&file[..end]);
+        if path.is_empty() {
+            return Ok(None);
+        }
+        // 与参考项目 ensureExtension 一致：用户删掉后缀时补回来
+        if !path.to_ascii_lowercase().ends_with(&format!(".{extension}")) {
+            path.push('.');
+            path.push_str(extension);
+        }
+        std::fs::write(&path, content).map_err(|error| format!("写入失败：{error}"))?;
+        Ok(Some(path))
+    }
 }
 
 /// 把 PNG（base64）写进系统剪贴板，供截图工具的「复制」使用
@@ -817,6 +906,83 @@ pub fn focus_host_window() -> bool {
 #[cfg(not(windows))]
 pub fn focus_host_window() -> bool {
     false
+}
+
+/// 导出允许的扩展名白名单（避免对话框被用来写任意类型文件）
+const EXPORT_EXTENSIONS: [&str; 4] = ["md", "html", "json", "txt"];
+/// 单次导出允许的最大正文（16 MiB），防止 RPC payload 把进程内存撑爆
+const EXPORT_MAX_CONTENT_BYTES: usize = 16 * 1024 * 1024;
+/// 自动化回归开关：设置后跳过系统模态对话框，直接写到该目录（生产环境不设置）
+const EXPORT_AUTO_DIR_ENV: &str = "DBX_NOTE_EXPORT_AUTO_DIR";
+
+/// 「导出」另存为：宿主 iframe 里的 `<a download>` 可能被沙箱吞掉，且用户不知道文件去了哪。
+/// 这里由 Sidecar 弹系统对话框并写盘，把**实际路径**回给 UI 显示。
+///
+/// @param params { defaultName, extension, filterName, content }
+/// @return `{ saved:true, path, size }` / `{ saved:false, cancelled:true }` /
+///         `{ saved:false, unsupported:true, message }`（非 Windows，前端降级 Blob 下载）
+pub fn save_text_file(params: &serde_json::Value) -> RpcResult {
+    let extension = crate::param_str(params, "extension").to_ascii_lowercase();
+    if !EXPORT_EXTENSIONS.contains(&extension.as_str()) {
+        return Err(RpcError::invalid("不支持的导出格式"));
+    }
+    let content = crate::param_str(params, "content");
+    if content.len() > EXPORT_MAX_CONTENT_BYTES {
+        return Err(RpcError::invalid("导出内容过大"));
+    }
+    let default_name = sanitize_export_name(&crate::param_str(params, "defaultName"), &extension);
+    let filter_name = crate::param_str(params, "filterName");
+    let filter = if filter_name.trim().is_empty() {
+        format!("{extension} 文件")
+    } else {
+        filter_name
+    };
+
+    // e2e / smoke 里不能弹模态框（会卡住 Sidecar 主线程）：用环境变量指定落盘目录
+    if let Some(auto_dir) = std::env::var_os(EXPORT_AUTO_DIR_ENV) {
+        let dir = std::path::PathBuf::from(auto_dir);
+        std::fs::create_dir_all(&dir)
+            .map_err(|error| RpcError::internal(format!("创建导出目录失败：{error}")))?;
+        let path = dir.join(&default_name);
+        std::fs::write(&path, &content)
+            .map_err(|error| RpcError::internal(format!("写入导出文件失败：{error}")))?;
+        let display = path.to_string_lossy().to_string();
+        return Ok(json!({ "saved": true, "path": display, "size": content.len() }));
+    }
+
+    #[cfg(windows)]
+    {
+        match win::save_text_dialog(&default_name, &extension, &filter, &content)
+            .map_err(RpcError::internal)?
+        {
+            Some(path) => Ok(json!({ "saved": true, "path": path, "size": content.len() })),
+            None => Ok(json!({ "saved": false, "cancelled": true })),
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (default_name, filter);
+        Ok(json!({
+            "saved": false,
+            "unsupported": true,
+            "message": "当前平台暂不支持系统另存为对话框"
+        }))
+    }
+}
+
+/// 对话框默认文件名：去掉目录分隔符与控制字符，并保证扩展名一致
+fn sanitize_export_name(raw: &str, extension: &str) -> String {
+    let name: String = raw
+        .chars()
+        .filter(|ch| !matches!(ch, '/' | '\\' | ':' | '\0') && !ch.is_control())
+        .collect();
+    let name = name.trim().to_string();
+    let name = if name.is_empty() { "document".to_string() } else { name };
+    if name.to_ascii_lowercase().ends_with(&format!(".{extension}")) {
+        name
+    } else {
+        format!("{name}.{extension}")
+    }
 }
 
 /// 兜底：进程退出前停掉录音线程

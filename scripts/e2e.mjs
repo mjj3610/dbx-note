@@ -1899,10 +1899,11 @@ if ((await tabList.getByRole('tab').count()) > 0) {
 }
 await page.waitForTimeout(700)
 check('编辑器底栏可见', await page.locator('[data-editor-footer]').isVisible())
-check('底栏提供复制 / 导出 / 历史版本', (await page.locator('[data-footer-copy]').count()) === 1
-  && (await page.locator('[data-footer-export]').count()) === 1
-  && (await page.locator('[data-footer-history]').count()) === 1)
+check('底栏提供复制 / 导出', (await page.locator('[data-footer-copy]').count()) === 1
+  && (await page.locator('[data-footer-export]').count()) === 1)
 check('底栏显示字符数', (await page.locator('[data-footer-chars]').innerText()).includes('字符'))
+// 与参考项目一致：没配置 Git 远端同步时不显示「历史版本」入口
+check('未配置 Git 远端时历史版本入口隐藏', (await page.locator('[data-footer-history]').count()) === 0)
 
 // 复制：4 种格式齐全，点 Markdown 后给出「已复制」反馈
 await page.locator('[data-footer-copy]').click()
@@ -1915,39 +1916,80 @@ check(
   (await page.locator('[data-sonner-toast]').allInnerTexts()).some((text) => text.includes('已复制')),
 )
 
-// 导出：4 种格式齐全，点 Markdown 后给出「已导出」反馈（下载由浏览器接管，不阻塞）
+// 导出：4 种格式齐全；文件必须**真的落盘**，且 toast 回显保存位置
+const EXPORT_DIR = join(ROOT, '.tmp', 'e2e-exports')
 await page.locator('[data-footer-export]').click()
 await page.waitForTimeout(300)
 check('导出菜单含 4 种格式', (await page.locator('[data-export-format]').count()) === 4)
 await page.locator('[data-export-format="markdown"]').click()
-await page.waitForTimeout(600)
+await page.waitForTimeout(900)
+const exportToasts = await page.locator('[data-sonner-toast]').allInnerTexts()
+check('导出 Markdown 给出反馈', exportToasts.some((text) => text.includes('已导出')))
+check('导出反馈回显保存位置', exportToasts.some((text) => text.includes('保存位置')))
+const exportedMd = existsSync(EXPORT_DIR)
+  ? readdirSync(EXPORT_DIR).filter((name) => name.endsWith('.md'))
+  : []
+check('导出文件真的写到磁盘', exportedMd.length >= 1, `找到 ${exportedMd.length} 个 .md`)
 check(
-  '导出 Markdown 给出反馈',
-  (await page.locator('[data-sonner-toast]').allInnerTexts()).some((text) => text.includes('已导出')),
+  '导出内容是笔记 Markdown 正文',
+  exportedMd.some((name) => /^# /m.test(readFileSync(join(EXPORT_DIR, name), 'utf8'))),
 )
 
-// 历史版本：面板可开、能建版本、有列表、可预览、恢复前弹二次确认且可取消
-await page.locator('[data-footer-history]').click()
-await page.waitForTimeout(700)
-check('历史版本面板可打开', await page.locator('[data-history-create]').isVisible())
-await page.locator('[data-history-create]').click()
-await page.waitForTimeout(800)
-check('历史版本列表有记录', (await page.locator('[data-history-item]').count()) >= 1)
-await page.locator('[data-history-preview]').first().click()
-await page.waitForTimeout(700)
-check('历史版本可预览正文', (await page.getByRole('dialog').locator('pre').innerText()).length > 0)
-await page.getByRole('dialog').getByRole('button', { name: '恢复此版本' }).click()
-await page.waitForTimeout(500)
-check(
-  '恢复历史版本前弹出二次确认',
-  (await page.getByRole('button', { name: '确认恢复' }).count()) === 1
-    && (await page.getByRole('button', { name: '取消' }).count()) >= 1,
-)
-await page.getByRole('button', { name: '取消' }).last().click()
-await page.waitForTimeout(400)
-check('取消恢复后确认框关闭', (await page.getByRole('button', { name: '确认恢复' }).count()) === 0)
-await page.keyboard.press('Escape')
-await page.waitForTimeout(300)
+/* ---------- 历史版本：准备真实 Git 提交历史（对齐参考项目远端 commit 列表） ---------- */
+
+/** 在工作区里跑 git；e2e 里 origin 是示例地址，devhost 已开 DBX_NOTE_HISTORY_OFFLINE 跳过联网 */
+const gitE2e = (...args) => execFileSync('git', ['-C', WORKSPACE, ...args], {
+  encoding: 'utf8',
+  stdio: ['ignore', 'pipe', 'pipe'],
+})
+try {
+  gitE2e('init')
+  gitE2e('config', 'user.email', 'e2e@example.com')
+  gitE2e('config', 'user.name', 'dbx-note e2e')
+  try { gitE2e('remote', 'remove', 'origin') } catch { /* 本来就没有 */ }
+  gitE2e('remote', 'add', 'origin', 'https://github.com/e2e-user/e2e-notes.git')
+  gitE2e('add', '-A')
+  try { gitE2e('commit', '-m', 'e2e: 初始提交') } catch { /* 已有提交 */ }
+  // 模拟「已 fetch 过的远端跟踪引用」，offline 模式下 history/commits 从这里取历史
+  const head = gitE2e('rev-parse', 'HEAD').trim()
+  gitE2e('update-ref', 'refs/remotes/origin/main', head)
+} catch (error) {
+  console.error('  ! 准备 Git 历史失败：', error.message)
+}
+// 同步平台可能在前文被切到对象存储，这里改回 github（走 devhost 的 /rpc 直达 Sidecar）
+await page.evaluate(async () => {
+  await fetch('/rpc', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ method: 'sync/saveOptions', params: { provider: 'github' } }),
+  })
+})
+// 通知组件「同步配置已变化」重新判定入口，不触发 App 的远端清单刷新
+await page.evaluate(() => window.dispatchEvent(new Event('dbx:sync-options-changed')))
+await page.waitForTimeout(1200)
+check('配置 Git 远端后出现历史版本入口', (await page.locator('[data-footer-history]').count()) === 1)
+
+if ((await page.locator('[data-footer-history]').count()) === 1) {
+  await page.locator('[data-footer-history]').click()
+  await page.waitForTimeout(1200)
+  check('历史版本面板列出远端提交', (await page.locator('[data-history-commit]').count()) >= 1)
+  check('提交条目有可点开的短 sha 链接',
+    (await page.locator('[data-history-commit-link]').first().getAttribute('href'))?.includes('/commit/') === true)
+  check('面板提供「在仓库中打开」链接',
+    (await page.locator('[data-history-open-repo]').first().getAttribute('href'))?.includes('/blob/') === true)
+  await page.locator('[data-history-restore]').first().click()
+  await page.waitForTimeout(500)
+  check(
+    '恢复历史版本前弹出二次确认',
+    (await page.getByRole('button', { name: '确认恢复' }).count()) === 1
+      && (await page.getByRole('button', { name: '取消' }).count()) >= 1,
+  )
+  await page.getByRole('button', { name: '取消' }).last().click()
+  await page.waitForTimeout(400)
+  check('取消恢复后确认框关闭', (await page.getByRole('button', { name: '确认恢复' }).count()) === 0)
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(300)
+}
 
 /* ---------- 知识库 / 记忆 ---------- */
 

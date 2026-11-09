@@ -6,6 +6,8 @@
  * 握手 / 工作区 / 文件树 / 读写 / 重命名 / 搜索 / 记录 / 标签 / 会话 / 设置 / 删除。
  *
  * 运行：node scripts/sidecar-check.mjs
+ *   DBX_NOTE_CHECK_DATA=.tmp/check-fresh 可指定全新数据目录
+ *   DBX_NOTE_BACKEND=<path> 可指定后端可执行文件
  * 依赖：已构建的 backend（npm run backend）与 Node 18+
  */
 import { spawn, execFileSync } from 'node:child_process'
@@ -20,7 +22,10 @@ const ROOT = resolve(import.meta.dirname, '..')
 const BIN = process.env.DBX_NOTE_BACKEND
   ? resolve(process.env.DBX_NOTE_BACKEND)
   : join(ROOT, 'backend', 'target', 'release', process.platform === 'win32' ? 'backend.exe' : 'backend')
-const DATA_DIR = join(ROOT, '.tmp', 'sidecar-check')
+// 允许指定全新数据目录：旧目录文件多时，启动前的 rmSync 可能被宿主的批量删除保护拦截
+const DATA_DIR = process.env.DBX_NOTE_CHECK_DATA
+  ? resolve(process.env.DBX_NOTE_CHECK_DATA)
+  : join(ROOT, '.tmp', 'sidecar-check')
 /** 以 manifest 为准，避免每次升版本都要改测试 */
 const MANIFEST = JSON.parse(readFileSync(join(ROOT, 'manifest.json'), 'utf8'))
 
@@ -169,6 +174,10 @@ const child = spawn(BIN, [], {
     DBX_NOTE_SHOT_HOTKEY: 'off',
     // 出口一律由 RPC 显式指定，清掉外部环境可能带进来的默认出口
     DBX_NOTE_SCREENSHOT_AUTO_EXIT: '',
+    // 导出「另存为」：自检不弹系统模态框，写到固定目录后校验文件真的落盘
+    DBX_NOTE_EXPORT_AUTO_DIR: join(ROOT, '.tmp', 'sidecar-exports'),
+    // 历史版本：origin 是本地裸仓库 / 示例地址，跳过联网 fetch
+    DBX_NOTE_HISTORY_OFFLINE: '1',
   },
   stdio: ['pipe', 'pipe', 'pipe'],
 })
@@ -275,6 +284,30 @@ async function main() {
     invalidHistoryBlocked = true
   }
   check('非法历史版本 id 明确报错', invalidHistoryBlocked)
+
+  /* ---------- 导出：系统「另存为」写盘（自检用 auto dir 跳过模态框） ---------- */
+  const savedFile = await call('dialog/saveFile', {
+    defaultName: '自检导出.md',
+    extension: 'md',
+    filterName: 'Markdown 文件',
+    content: '# 自检导出\n\n正文落盘验证。\n',
+  })
+  check(
+    '另存为写盘并返回实际保存路径',
+    savedFile.saved === true && String(savedFile.path).endsWith('自检导出.md'),
+    JSON.stringify(savedFile),
+  )
+  check(
+    '另存为落盘内容与传入一致',
+    savedFile.path && readFileSync(savedFile.path, 'utf8').includes('正文落盘验证。'),
+  )
+  let badExtensionBlocked = false
+  try {
+    await call('dialog/saveFile', { defaultName: 'x.exe', extension: 'exe', filterName: 'x', content: 'x' })
+  } catch {
+    badExtensionBlocked = true
+  }
+  check('另存为拒绝白名单外的扩展名', badExtensionBlocked)
 
   const tree = await call('fs/tree', {})
   check('文件树包含新建目录', tree.children.some((node) => node.name === '日记' && node.kind === 'folder'))
@@ -805,6 +838,44 @@ async function main() {
     await call('sync/push')
     await call('sync/recordBase')
     check('保留本地后可以正常推送', (await call('sync/compare', { path: 'peer-new.md' })).action === 'none')
+
+    /* ---------- 历史版本：远端提交历史（对齐参考项目 history-sheet） ---------- */
+    const originalOrigin = git(['remote', 'get-url', 'origin'], WORKSPACE).trim()
+    try {
+      // 本地裸仓库地址解析不出「在仓库中打开」链接，临时换成示例 GitHub 地址；
+      // DBX_NOTE_HISTORY_OFFLINE=1 会跳过联网 fetch，直接用本地提交对象。
+      git(['remote', 'set-url', 'origin', 'https://github.com/e2e-user/e2e-notes.git'], WORKSPACE)
+      git(['update-ref', 'refs/remotes/origin/main', 'HEAD'], WORKSPACE)
+
+      const historyStatus = await call('history/status')
+      check('Git 远端已配置时历史版本入口可用', historyStatus.supported === true, JSON.stringify(historyStatus))
+      check('历史版本回传仓库地址', String(historyStatus.repoUrl).includes('github.com/e2e-user/e2e-notes'))
+
+      const historyList = await call('history/commits', { path: 'sync-test.md' })
+      check('列出当前笔记的远端提交', (historyList.commits ?? []).length >= 1, `条数=${historyList.commits?.length}`)
+      const firstCommit = historyList.commits?.[0]
+      check(
+        '提交条目含 sha / 说明 / 作者 / 时间 / 远端链接',
+        Boolean(firstCommit?.sha && firstCommit?.shortSha && firstCommit?.message
+          && firstCommit?.author && firstCommit?.date && firstCommit?.url?.includes('/commit/')),
+        JSON.stringify(firstCommit),
+      )
+      check('面板返回「在仓库中打开」链接', String(historyList.fileUrl).includes('/blob/'))
+
+      const historical = await call('history/content', { path: 'sync-test.md', sha: firstCommit?.sha ?? '' })
+      check('按完整 sha 可取回该版本正文', typeof historical.content === 'string' && historical.content.includes('#'))
+      let badShaBlocked = false
+      try {
+        await call('history/content', { path: 'sync-test.md', sha: 'not-a-sha' })
+      } catch {
+        badShaBlocked = true
+      }
+      check('非法 sha 明确报错', badShaBlocked)
+    } finally {
+      // 后面的备份 / 文件树用例还要用原来的本地裸仓库地址
+      git(['remote', 'set-url', 'origin', originalOrigin], WORKSPACE)
+    }
+    check('历史版本用例结束后恢复 origin', git(['remote', 'get-url', 'origin'], WORKSPACE).trim() === originalOrigin)
 
     // 清理用例文件，避免影响后面「文件树」与「备份」断言
     rmSync(note, { force: true })

@@ -1,26 +1,61 @@
 /**
- * 笔记「复制 / 导出」的纯工具层（对齐参考项目 footer-bar 的 4 种复制 + 4 种导出格式）
+ * 笔记「复制 / 导出」工具层（对齐参考项目 footer-bar + markdown-export.ts）
+ *
+ * 关键语义：
+ * - 桌面端导出走 **Sidecar 系统「另存为」对话框**，用户自己选路径，写盘后返回实际路径；
+ *   取消不写盘也不报成功；当前平台没有原生对话框时才降级为浏览器 Blob 下载。
+ *   宿主 iframe 里的 `<a download>` 可能被沙箱吞掉，不能作为默认落盘方式。
+ * - JSON 导出的是 **Tiptap JSON 文档**（`MarkdownManager.parse`），不是 marked 的 token 树。
+ * - HTML 导出会把工作区图片内联成 data URL，避免导出文件离开工作区后丢图。
+ * - PDF 走系统打印窗口，打印不可用时降级导出 HTML。
  *
  * 调用示例：
- *   const md = '# 标题\n正文'
- *   await copyText(contentForCopy('text', md))                    // 复制纯文本
- *   const { filename, content, mime } = contentForExport('html', md, '笔记.md')
- *   downloadText(filename, content, mime)                         // 导出 HTML
- *   await printPdf(buildHtmlDocument('笔记', renderMarkdownHtml(md))) // 导出 PDF
- *
- * 注意：Markdown 源文本一律取 `useNotesStore.content`，可视化编辑器与源码模式共用同一份，
- * 所以这里不需要持有 Tiptap Editor 实例。
+ *   await copyText(await contentForCopy('text', { path: '笔记.md', markdown: '# 标题' }))
+ *   const result = await exportMarkdown('html', { path: '笔记.md', markdown: '# 标题' })
+ *   console.log(result.path) // 用户选定的实际保存路径
  */
+import { MarkdownManager } from '@tiptap/markdown'
+import StarterKit from '@tiptap/starter-kit'
+import TaskItem from '@tiptap/extension-task-item'
+import TaskList from '@tiptap/extension-task-list'
 import DOMPurify from 'dompurify'
 import { marked } from 'marked'
+
+import * as rpc from './rpc'
 
 /** 复制支持的 4 种格式 */
 export type CopyFormat = 'markdown' | 'html' | 'json' | 'text'
 /** 导出支持的 4 种格式（PDF 走系统打印窗口） */
 export type ExportFormat = 'markdown' | 'html' | 'json' | 'pdf'
 
+/** 内容源：路径用于生成文件名与解析图片相对路径 */
+export interface NoteSource {
+  /** 工作区相对路径，如 `项目/规划.md` */
+  path: string
+  markdown: string
+}
+
+/** 一次导出的结果；`saved=false` 表示用户取消 */
+export interface ExportOutcome {
+  format: ExportFormat
+  saved: boolean
+  cancelled?: boolean
+  /** 实际写盘的绝对路径（系统另存为时） */
+  path?: string
+  /** 展示用文件名 */
+  filename?: string
+  /** 降级为浏览器下载 */
+  fallback?: boolean
+  /** PDF 打印窗口已唤起 */
+  printed?: boolean
+}
+
 /** 导出文件名里不允许出现的字符（Windows / macOS / Linux 交集） */
 const INVALID_FILE_NAME_CHARS = /[<>:"/\\|?*\x00-\x1F]/g
+/** 打印 iframe 的兜底清理时间：打印窗口可能稍晚才读完文档 */
+const PRINT_FRAME_CLEANUP_MS = 60_000
+/** 等待导出文档里单张图片的最长时间 */
+const IMAGE_LOAD_TIMEOUT_MS = 3_000
 /** 导出 HTML 的标题与正文基础样式，打印 PDF 时同样生效 */
 const EXPORT_DOCUMENT_STYLES = `
   @page { size: A4; margin: 18mm 16mm 20mm; }
@@ -43,10 +78,8 @@ const EXPORT_DOCUMENT_STYLES = `
   .dbx-note-export a { color: #0969da; }
   @media print { body.dbx-note-export { max-width: none; padding: 0; } }
 `
-/** 打印 iframe 的兜底清理时间：打印窗口可能稍晚才读完文档 */
-const PRINT_FRAME_CLEANUP_MS = 60_000
-/** 等待导出文档里单张图片的最长时间 */
-const IMAGE_LOAD_TIMEOUT_MS = 3_000
+
+let markdownManager: MarkdownManager | null = null
 
 /**
  * 净化文件名。
@@ -76,13 +109,66 @@ function escapeHtml(value: string): string {
     .replace(/'/g, '&#39;')
 }
 
-/**
- * Markdown → 净化后的 HTML 片段。
- * `marked` 默认同步解析；DOMPurify 去掉脚本、事件属性等，导出文件不允许带可执行内容。
- */
-export function renderMarkdownHtml(markdown: string): string {
+/** Markdown → 净化后的 HTML 片段（同步，纯文本复制走这条，不做图片内联） */
+function renderMarkdownFragment(markdown: string): string {
   const raw = marked.parse(markdown, { async: false }) as string
   return DOMPurify.sanitize(raw, { USE_PROFILES: { html: true } })
+}
+
+/** 归一化 `项目/../assets/x.png` 这类路径，且不允许越出工作区 */
+function normalizeRelativePath(raw: string): string {
+  const parts: string[] = []
+  for (const part of raw.replace(/\\/g, '/').split('/')) {
+    if (!part || part === '.') continue
+    if (part === '..') {
+      if (parts.length > 0) parts.pop()
+      continue
+    }
+    parts.push(part)
+  }
+  return parts.join('/')
+}
+
+/**
+ * 把 HTML 里的**工作区图片**换成 data URL，导出文件脱离工作区后仍能显示。
+ * 远端 http(s) 图、已经是 data:/blob: 的保持原样。
+ */
+async function inlineWorkspaceImages(html: string, sourcePath: string): Promise<string> {
+  const template = document.createElement('template')
+  template.innerHTML = html
+  const images = Array.from(template.content.querySelectorAll('img'))
+  const noteDir = sourcePath.includes('/') ? sourcePath.slice(0, sourcePath.lastIndexOf('/')) : ''
+
+  await Promise.all(
+    images.map(async (image) => {
+      const src = image.getAttribute('src')
+      if (!src || /^(?:data:|blob:|https?:|\/\/)/i.test(src)) return
+      // 本项目图片默认写在工作区根（assets/...），也兼容相对当前笔记目录的写法
+      const candidates = [normalizeRelativePath(src)]
+      if (noteDir) candidates.push(normalizeRelativePath(`${noteDir}/${src}`))
+      for (const candidate of candidates) {
+        if (!candidate) continue
+        try {
+          const data = await rpc.readImage(candidate)
+          image.setAttribute('src', data.dataUrl)
+          return
+        } catch {
+          // 路径不存在时试下一个候选；全部失败就保留原 src
+        }
+      }
+    }),
+  )
+  return template.innerHTML
+}
+
+/**
+ * Markdown → 可导出 / 可复制的完整 HTML 片段（含图片内联）。
+ * @param markdown 正文
+ * @param sourcePath 当前笔记路径，用于解析相对图片；不传则跳过内联
+ */
+export async function renderMarkdownHtml(markdown: string, sourcePath?: string): Promise<string> {
+  const fragment = renderMarkdownFragment(markdown)
+  return sourcePath ? inlineWorkspaceImages(fragment, sourcePath) : fragment
 }
 
 /**
@@ -105,11 +191,9 @@ ${bodyHtml}
 </html>`
 }
 
-/**
- * Markdown → 纯文本：先渲染成 HTML，再按块级标签补换行后取文本节点。
- */
+/** Markdown → 纯文本：先渲染成 HTML，再按块级标签补换行后取文本节点 */
 export function toPlainText(markdown: string): string {
-  const html = renderMarkdownHtml(markdown)
+  const html = renderMarkdownFragment(markdown)
     .replace(/<\/(p|div|li|h[1-6]|blockquote|pre|tr)>/gi, '\n')
     .replace(/<br\s*\/?>/gi, '\n')
   const template = document.createElement('template')
@@ -117,72 +201,42 @@ export function toPlainText(markdown: string): string {
   return (template.content.textContent ?? '').replace(/\n{3,}/g, '\n\n').trim()
 }
 
-/**
- * Markdown → 结构化 JSON（marked 的词法 token 树），便于其它程序消费。
- */
+/** 懒构造 Markdown → Tiptap JSON 的解析器（与参考项目 `parseMarkdownToJson` 一致） */
+function getMarkdownManager(): MarkdownManager {
+  if (!markdownManager) {
+    markdownManager = new MarkdownManager({
+      extensions: [StarterKit, TaskList, TaskItem],
+      indentation: { style: 'space', size: 2 },
+    })
+  }
+  return markdownManager
+}
+
+/** Markdown → Tiptap JSON 文档字符串 */
 export function toJson(markdown: string): string {
-  return JSON.stringify(marked.lexer(markdown), null, 2)
+  return JSON.stringify(getMarkdownManager().parse(markdown), null, 2)
 }
 
 /**
  * 按格式生成要写入剪贴板的文本。
  * @param format 复制格式
- * @param markdown 当前笔记 Markdown 源文本
+ * @param source 当前笔记的路径与 Markdown
  */
-export function contentForCopy(format: CopyFormat, markdown: string): string {
+export async function contentForCopy(format: CopyFormat, source: NoteSource): Promise<string> {
   switch (format) {
     case 'html':
-      return renderMarkdownHtml(markdown)
+      return renderMarkdownHtml(source.markdown, source.path)
     case 'json':
-      return toJson(markdown)
+      return toJson(source.markdown)
     case 'text':
-      return toPlainText(markdown)
+      return toPlainText(source.markdown)
     case 'markdown':
     default:
-      return markdown
+      return source.markdown
   }
 }
 
-/**
- * 按格式生成下载文件（PDF 不在本函数内，走 `printPdf`）。
- * @param format 导出格式
- * @param markdown 当前笔记 Markdown 源文本
- * @param path 当前笔记路径，用于生成文件名
- * @returns 文件名、内容与 MIME；文件名已带对应扩展名
- */
-export function contentForExport(
-  format: Exclude<ExportFormat, 'pdf'>,
-  markdown: string,
-  path: string,
-): { filename: string; content: string; mime: string } {
-  const base = exportBaseName(path)
-  switch (format) {
-    case 'html':
-      return {
-        filename: `${base}.html`,
-        content: buildHtmlDocument(base, renderMarkdownHtml(markdown)),
-        mime: 'text/html;charset=utf-8',
-      }
-    case 'json':
-      return {
-        filename: `${base}.json`,
-        content: toJson(markdown),
-        mime: 'application/json;charset=utf-8',
-      }
-    case 'markdown':
-    default:
-      return {
-        filename: `${base}.md`,
-        content: markdown,
-        mime: 'text/markdown;charset=utf-8',
-      }
-  }
-}
-
-/**
- * 浏览器下载：Blob + 临时 `<a download>`，用完立刻释放 URL。
- * 与截图浮层的下载路径一致，在插件沙箱里已验证可用。
- */
+/** 浏览器下载：Blob + 临时 `<a download>`，仅作为原生对话框不可用时的降级 */
 export function downloadText(filename: string, content: string, mime: string): void {
   const url = URL.createObjectURL(new Blob([content], { type: mime }))
   const link = document.createElement('a')
@@ -194,7 +248,36 @@ export function downloadText(filename: string, content: string, mime: string): v
   window.setTimeout(() => URL.revokeObjectURL(url), 0)
 }
 
-/** 等一张图片加载完（失败或超时都继续，不阻塞导出） */
+/** 从绝对路径里取文件名，用于 toast 展示 */
+function fileNameOf(path: string): string {
+  return path.split(/[\\/]/).pop() || path
+}
+
+/**
+ * 导出文本文件：优先系统另存为，取消不写盘，不支持时降级浏览器下载。
+ * @returns 是否真的保存，以及实际路径
+ */
+async function saveTextExport(
+  content: string,
+  filename: string,
+  extension: string,
+  mime: string,
+  filterName: string,
+  format: ExportFormat,
+): Promise<ExportOutcome> {
+  const result = await rpc.saveTextFile({ defaultName: filename, extension, filterName, content })
+  if (result.saved && result.path) {
+    return { format, saved: true, path: result.path, filename: fileNameOf(result.path) }
+  }
+  if (result.cancelled) {
+    return { format, saved: false, cancelled: true }
+  }
+  // 非 Windows 桩 / 对话框不可用：退回浏览器下载，并明确告知是降级
+  downloadText(filename, content, mime)
+  return { format, saved: true, filename, fallback: true }
+}
+
+/** 等一张图片加载完（失败或超时都继续，不阻塞打印） */
 function waitForImage(image: HTMLImageElement): Promise<void> {
   if (image.complete) return Promise.resolve()
   return new Promise((resolve) => {
@@ -206,8 +289,6 @@ function waitForImage(image: HTMLImageElement): Promise<void> {
 
 /**
  * 用隐藏 iframe 打开系统打印窗口（用户选择「另存为 PDF」）。
- * 沙箱若禁止 iframe 打印则返回 false，调用方应提示改用「导出 HTML」。
- * @param html `buildHtmlDocument()` 的完整文档
  * @returns 是否成功唤起打印
  */
 export async function printPdf(html: string): Promise<boolean> {
@@ -228,12 +309,72 @@ export async function printPdf(html: string): Promise<boolean> {
     doc.close()
     await Promise.all(Array.from(doc.images).map(waitForImage))
     if (doc.fonts) await doc.fonts.ready
+
+    let cleanedUp = false
+    const cleanup = () => {
+      if (cleanedUp) return
+      cleanedUp = true
+      frame.remove()
+    }
+    win.addEventListener('afterprint', cleanup, { once: true })
+    window.setTimeout(cleanup, PRINT_FRAME_CLEANUP_MS)
     win.focus()
     win.print()
-    window.setTimeout(() => frame.remove(), PRINT_FRAME_CLEANUP_MS)
     return true
   } catch {
     frame.remove()
     return false
   }
+}
+
+/** 构建导出的完整 HTML 文档（导出 HTML 与 PDF 共用） */
+async function exportHtmlDocument(source: NoteSource): Promise<string> {
+  const base = exportBaseName(source.path)
+  return buildHtmlDocument(base, await renderMarkdownHtml(source.markdown, source.path))
+}
+
+/**
+ * 导出当前笔记。
+ * @param format 目标格式
+ * @param source 当前笔记的路径与 Markdown
+ * @returns 是否保存、`path` 实际落盘位置；取消时 `saved=false`
+ */
+export async function exportMarkdown(format: ExportFormat, source: NoteSource): Promise<ExportOutcome> {
+  const base = exportBaseName(source.path)
+  if (format === 'markdown') {
+    return saveTextExport(source.markdown, `${base}.md`, 'md', 'text/markdown;charset=utf-8', 'Markdown 文件', format)
+  }
+  if (format === 'html') {
+    return saveTextExport(
+      await exportHtmlDocument(source),
+      `${base}.html`,
+      'html',
+      'text/html;charset=utf-8',
+      'HTML 文件',
+      format,
+    )
+  }
+  if (format === 'json') {
+    return saveTextExport(
+      toJson(source.markdown),
+      `${base}.json`,
+      'json',
+      'application/json;charset=utf-8',
+      'JSON 文件',
+      format,
+    )
+  }
+  // PDF：唤起系统打印窗口；环境不支持时退化为导出 HTML，用户可在浏览器里打印成 PDF
+  if (await printPdf(await exportHtmlDocument(source))) {
+    return { format, saved: true, printed: true, filename: `${base}.pdf` }
+  }
+  const fallback = await saveTextExport(
+    await exportHtmlDocument(source),
+    `${base}.html`,
+    'html',
+    'text/html;charset=utf-8',
+    'HTML 文件',
+    format,
+  )
+  return { ...fallback, fallback: true }
 }

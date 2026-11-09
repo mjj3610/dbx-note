@@ -15,6 +15,7 @@ mod backup;
 mod canvas;
 mod db;
 mod files;
+mod githistory;
 mod gitsync;
 mod imagehost;
 mod logs;
@@ -66,7 +67,7 @@ use serde_json::{json, Value};
 
 /// 插件标识与版本，必须与 manifest.json 保持一致
 const PLUGIN_ID: &str = "com.mjj3610.note";
-pub(crate) const PLUGIN_VERSION: &str = "0.5.3";
+pub(crate) const PLUGIN_VERSION: &str = "0.5.4";
 /// 协议版本
 const PROTOCOL_VERSION: i64 = 1;
 
@@ -343,6 +344,8 @@ fn dispatch(app: &App, method: &str, params: Value) -> RpcResult {
         "screenshot/typeText" => screenshot::type_text(&params),
         "clipboard/image" => native::capture_clipboard(),
         "clipboard/write" => native::write_clipboard(&params),
+        // 导出：系统「另存为」对话框选路径后由 Sidecar 写盘（宿主 iframe 的 download 不可靠）
+        "dialog/saveFile" => native::save_text_file(&params),
         "audio/recordStart" => native::record_start(),
         "audio/recordStop" => native::record_stop(),
         "audio/recordStatus" => native::record_status(),
@@ -421,6 +424,10 @@ fn dispatch(app: &App, method: &str, params: Value) -> RpcResult {
         "history/list" => db::history_list(app, &params),
         "history/get" => db::history_get(app, &params),
         "history/create" => db::history_create(app, &params),
+        // 远端 Git 提交历史（对齐参考项目 history-sheet）
+        "history/status" => githistory::status(app),
+        "history/commits" => githistory::commits(app, &params),
+        "history/content" => githistory::content(app, &params),
 
         // ---------------- AI ----------------
         "ai/chat" => ai::chat(app, &params),

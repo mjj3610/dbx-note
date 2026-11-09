@@ -19,20 +19,16 @@ import {
 } from '@/components/ui/menu'
 import { copyText } from '@/lib/bridge'
 import {
-  buildHtmlDocument,
   contentForCopy,
-  contentForExport,
-  downloadText,
-  exportBaseName,
-  printPdf,
-  renderMarkdownHtml,
+  exportMarkdown,
   type CopyFormat,
   type ExportFormat,
+  type NoteSource,
 } from '@/lib/markdownExport'
 import { useT } from '@/lib/useT'
 import { useNotesStore } from '@/stores/notes'
 import { useUiStore } from '@/stores/ui'
-import { HistoryMenu } from './editor/HistoryMenu'
+import { HistorySheet } from './editor/HistorySheet'
 
 /** 底栏按钮的统一外观（浅色 / 深色主题都跟随 muted 前景色） */
 const FOOTER_BUTTON_CLASS =
@@ -51,14 +47,14 @@ function errorMessage(error: unknown): string {
 }
 
 /** 复制：把当前笔记按指定格式写入系统剪贴板（优先宿主能力，降级浏览器 API） */
-function CopyMenu({ markdown }: { markdown: string }) {
+function CopyMenu({ source }: { source: NoteSource }) {
   const t = useT()
   const [busy, setBusy] = useState(false)
 
   const runCopy = async (format: CopyFormat) => {
     setBusy(true)
     try {
-      const ok = await copyText(contentForCopy(format, markdown))
+      const ok = await copyText(await contentForCopy(format, source))
       if (!ok) throw new Error('clipboard unavailable')
       toast.success(t('footer.copySuccess', { format: t(`footer.format.${format}`) }))
     } catch (error) {
@@ -92,29 +88,31 @@ function CopyMenu({ markdown }: { markdown: string }) {
   )
 }
 
-/** 导出：Markdown / HTML / JSON 直接下载，PDF 打开系统打印窗口 */
-function ExportMenu({ markdown, path }: { markdown: string; path: string }) {
+/**
+ * 导出：系统「另存为」对话框选路径 → Sidecar 写盘 → 回显实际位置。
+ * 取消不报成功；非 Windows 降级浏览器下载时明确告知用户。
+ */
+function ExportMenu({ source }: { source: NoteSource }) {
   const t = useT()
   const [busy, setBusy] = useState(false)
 
   const runExport = async (format: ExportFormat) => {
     setBusy(true)
     try {
-      if (format === 'pdf') {
-        const html = buildHtmlDocument(exportBaseName(path), renderMarkdownHtml(markdown))
-        if (await printPdf(html)) {
-          toast.success(t('footer.exportPdfHint'))
-        } else {
-          // 沙箱禁掉 iframe 打印时不能静默失败：退化为 HTML，用户可在浏览器里打印成 PDF
-          const fallback = contentForExport('html', markdown, path)
-          downloadText(fallback.filename, fallback.content, fallback.mime)
-          toast.message(t('footer.exportPdfFallback'))
-        }
-        return
+      if (format === 'pdf') toast.message(t('footer.exportPdfHint'))
+      const outcome = await exportMarkdown(format, source)
+      // 用户在另存为里点了取消：不写盘、不给成功反馈（与参考项目一致）
+      if (!outcome.saved) return
+      const filename = outcome.filename ?? ''
+      if (outcome.printed) {
+        toast.success(t('footer.exportPdfOpened'))
+      } else if (outcome.fallback && outcome.format === 'pdf') {
+        toast.message(t('footer.exportPdfFallback'))
+      } else if (outcome.fallback) {
+        toast.success(t('footer.exportSuccessFallback', { filename }))
+      } else {
+        toast.success(t('footer.exportSavedAt', { filename, path: outcome.path ?? '' }))
       }
-      const file = contentForExport(format, markdown, path)
-      downloadText(file.filename, file.content, file.mime)
-      toast.success(t('footer.exportSuccess', { filename: file.filename }))
     } catch (error) {
       toast.error(t('footer.exportFailed', { message: errorMessage(error) }))
     } finally {
@@ -159,6 +157,11 @@ export function EditorFooterBar() {
   const content = useNotesStore((state) => state.content)
   const tab = useUiStore((state) => state.tab)
   const chars = useMemo(() => content.replace(/\s+/g, '').length, [content])
+  /** 复制 / 导出共用同一份内容源：路径用于基名与图片内联，正文始终取最新 Markdown */
+  const source = useMemo<NoteSource>(
+    () => ({ path: activePath ?? '', markdown: content }),
+    [activePath, content],
+  )
 
   /** 大纲：复用左侧栏页签，左栏被收起时先展开 */
   const toggleOutline = () => {
@@ -175,8 +178,8 @@ export function EditorFooterBar() {
       data-editor-footer
       className="flex h-7 min-h-7 shrink-0 items-center gap-1 border-t border-border bg-background px-2.5 text-[11px] text-muted-foreground"
     >
-      <CopyMenu markdown={content} />
-      <ExportMenu markdown={content} path={activePath} />
+      <CopyMenu source={source} />
+      <ExportMenu source={source} />
 
       <button
         type="button"
@@ -196,7 +199,7 @@ export function EditorFooterBar() {
       </span>
 
       <span className="flex-1" />
-      <HistoryMenu path={activePath} markdown={content} />
+      <HistorySheet path={activePath} />
     </footer>
   )
 }

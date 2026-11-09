@@ -74,4 +74,13 @@ pub fn record_status() -> RpcResult {
 }
 
 /// 进程收尾时释放全局资源；非 Windows 下没有需要释放的东西
+/// 非 Windows 没有系统「另存为」对话框：返回 unsupported，前端降级为浏览器下载
+pub fn save_text_file(_params: &Value) -> RpcResult {
+    Ok(serde_json::json!({
+        "saved": false,
+        "unsupported": true,
+        "message": "当前平台暂不支持系统另存为对话框"
+    }))
+}
+
 pub fn shutdown() {}

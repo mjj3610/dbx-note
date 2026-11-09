@@ -219,6 +219,84 @@ export function historyCreate(path: string, content: string): Promise<{ created:
   return call('history/create', { path, content }, WRITE_TIMEOUT)
 }
 
+/* ---------------- 远端 Git 提交历史（对齐参考项目 history-sheet） ---------------- */
+
+/** 远端仓库里的一条提交 */
+export interface HistoryCommit {
+  /** 完整 sha，恢复时用 */
+  sha: string
+  /** 展示用的 7 位短 sha */
+  shortSha: string
+  /** 提交说明（subject 第一行） */
+  message: string
+  author: string
+  /** ISO 8601 作者时间 */
+  date: string
+  /** 远端 commit 页面 */
+  url: string
+}
+
+/** 「历史版本」入口是否可用 */
+export interface HistoryStatus {
+  supported: boolean
+  provider?: string
+  repoUrl?: string
+  branch?: string
+  reason?: string
+}
+
+/** 当前笔记的提交历史 */
+export interface HistoryCommitList {
+  supported: boolean
+  provider?: string
+  /** 「在仓库中打开」链接 */
+  fileUrl?: string
+  commits: HistoryCommit[]
+  reason?: string
+}
+
+/** 查历史版本入口可用性；不支持时返回原因而不是抛错 */
+export function historyStatus(): Promise<HistoryStatus> {
+  return call('history/status', {}, 30_000)
+}
+
+/** 拉当前笔记在远端仓库的最近 10 条提交 */
+export function historyCommits(path: string): Promise<HistoryCommitList> {
+  return call('history/commits', { path }, 30_000)
+}
+
+/** 按完整 sha 取某次提交里该笔记的正文 */
+export function historyContent(
+  path: string,
+  sha: string,
+): Promise<{ sha: string; path: string; content: string; size: number }> {
+  return call('history/content', { path, sha }, 30_000)
+}
+
+/* ---------------- 导出：系统另存为 ---------------- */
+
+export interface SaveTextResult {
+  saved: boolean
+  /** 实际写盘的绝对路径，用于 UI 回显「保存在哪里」 */
+  path?: string
+  size?: number
+  /** 用户取消，不写盘也不报成功 */
+  cancelled?: boolean
+  /** 当前平台没有系统对话框，前端降级为浏览器下载 */
+  unsupported?: boolean
+  message?: string
+}
+
+/** 弹系统「另存为」对话框并写盘；模态对话框可能停留较久，超时给 120 秒 */
+export function saveTextFile(params: {
+  defaultName: string
+  extension: string
+  filterName: string
+  content: string
+}): Promise<SaveTextResult> {
+  return call('dialog/saveFile', params, 120_000)
+}
+
 export function createEntry(params: {
   kind: 'file' | 'folder'
   parent: string
@@ -752,14 +830,19 @@ export function syncOptions(): Promise<{ options: SyncOptions }> {
   return call('sync/options', {})
 }
 
-export function syncSaveOptions(params: {
+export async function syncSaveOptions(params: {
   provider?: string
   token?: string
   clearToken?: boolean
   autoCommit?: boolean
   messageTemplate?: string
 }): Promise<{ options: SyncOptions }> {
-  return call('sync/saveOptions', params)
+  const result = await call<{ options: SyncOptions }>('sync/saveOptions', params)
+  // 同步平台变化会影响「历史版本」入口是否可用，通知底栏立即重判，不必重载页面
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new Event('dbx:sync-options-changed'))
+  }
+  return result
 }
 
 export function syncStatus(): Promise<SyncStatus> {
