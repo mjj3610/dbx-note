@@ -212,7 +212,13 @@ Linux（X11 `XGetImage`、Wayland portal、`_NET_WM_STATE_ABOVE`、`XGrabKey`、
   PR diff 只有一个文件；
 - 看 CI：`GET /repos/{owner}/{repo}/commits/{sha}/check-runs`，失败时再用
   `GET /actions/jobs/{job_id}/logs` 取日志（日志接口返回纯文本）；
-- 取仓库内容做本地校验：`GET /repos/t8y2/dbx-store/tarball/main`。
+- 取仓库内容做本地校验：`GET /repos/t8y2/dbx-store/tarball/main`；
+- **推送自己的仓库也可能 502**：0.5.3 最后一个文档提交时 `git push` 连续两次
+  `schannel: server closed abruptly`，重试脚本三次又都是 `CONNECT tunnel failed 502`。
+  此时用 `.tmp/rebuild-commits.mjs` 走 Git Data API 逐个重建本地领先的提交：
+  带同一个 tree / parents / author / committer / message，远端会算出**与本地完全相同的 sha**，
+  不会产生分叉；跑完 `git update-ref refs/remotes/origin/main <sha>` 同步本地跟踪引用即可，
+  全程不需要 `git fetch`。
 
 签名命令 `/sign` 只有维护者 `t8y2` 本人评论才生效（`sign-command.yml` 里写死了
 `github.actor == 't8y2'`），作者侧无法触发，只能等。
