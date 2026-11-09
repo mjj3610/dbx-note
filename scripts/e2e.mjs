@@ -152,7 +152,9 @@ page.on('response', (response) => {
 })
 
 await page.goto('http://127.0.0.1:5196/', { waitUntil: 'networkidle' })
-await page.waitForTimeout(1500)
+// 冷启动要读设置 / 探活 Sidecar / 扫工作区 / 恢复标签，显式等外壳可见再开始断言
+await page.locator('header').first().waitFor({ state: 'visible', timeout: 30_000 })
+await page.waitForTimeout(300)
 
 /**
  * 顶栏「设置」按钮。
