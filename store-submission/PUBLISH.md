@@ -4,14 +4,14 @@
 
 | 项 | 值 |
 | --- | --- |
-| 已上架版本 | `com.mjj3610.note` **v0.5.0**（#469 已于 2026-11-05 签名并合并） |
-| 版本更新 PR | https://github.com/t8y2/dbx-store/pull/487 （0.5.0 → **0.5.4**，1 文件 +59 行，分支 `add-com.mjj3610.note-0.5.4`，open） |
+| 已上架版本 | `com.mjj3610.note` **v0.5.4**（#487 已被维护者签名并合并；上游 `plugins/com.mjj3610.note.json` 的 source 已指向 `tree/v0.5.4`） |
+| 版本更新 PR | 0.5.4 的 https://github.com/t8y2/dbx-store/pull/487 状态为 closed / merged=true（4 文件 +286 −38，含签名工作流写回的 `plugins/` 与 `catalog/`）；**当前没有 open 候选**，0.5.5 可直接提新 PR |
 | 候选包 | 5 个平台，见下表 |
 | 源码 | https://github.com/mjj3610/dbx-note/tree/v0.5.4 |
 | Release | https://github.com/mjj3610/dbx-note/releases/tag/v0.5.4 （CI run 42573285429，一次通过，5 平台） |
-| PR 校验 | `validate` 失败，**但这是预期的**：本地用同一份上游 catalog 跑 `validate.mjs`，唯一错误是 `Catalog contains 1 open candidate(s) awaiting DBX Store signing: com.mjj3610.note@0.5.4` |
-| 旧 PR | #486（0.5.3 候选）复核确认 open / 未合并 / 0 评论 / 0 review / diff 仅候选文件后已留言并关闭；#484（0.5.2 候选）此前同样关闭，保证同一插件只有一个 open 候选 |
-| 待办 | 等维护者审核并评论 `/sign`；签名后 `validate` 转绿，由维护者合并 |
+| PR 校验 | 0.5.4 提 PR 时 `validate` 失败是**签名前预期**：唯一错误是 `Catalog contains 1 open candidate(s) awaiting DBX Store signing: com.mjj3610.note@0.5.4`；维护者 `/sign` 后已合并 |
+| 旧 PR | #486（0.5.3）、#484（0.5.2）复核后均已关闭；#487（0.5.4）已签名合并。当前**没有需要关闭的 open 候选** |
+| 待办 | v0.5.5 已开发完成、等待发布；发布后新 PR 仍需等维护者审核并评论 `/sign` |
 
 候选包指纹（全部来自 CI 的 `release-candidates.json`，未签名）：
 
