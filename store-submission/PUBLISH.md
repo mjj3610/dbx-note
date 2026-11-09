@@ -5,25 +5,39 @@
 | 项 | 值 |
 | --- | --- |
 | 已上架版本 | `com.mjj3610.note` **v0.5.0**（#469 已于 2026-11-05 签名并合并） |
-| 版本更新 PR | https://github.com/t8y2/dbx-store/pull/486 （0.5.0 → **0.5.3**，1 文件 +59 行，分支 `add-com.mjj3610.note-0.5.3`，open） |
+| 版本更新 PR | https://github.com/t8y2/dbx-store/pull/487 （0.5.0 → **0.5.4**，1 文件 +59 行，分支 `add-com.mjj3610.note-0.5.4`，open） |
 | 候选包 | 5 个平台，见下表 |
-| 源码 | https://github.com/mjj3610/dbx-note/tree/v0.5.3 |
-| Release | https://github.com/mjj3610/dbx-note/releases/tag/v0.5.3 （CI run 42562596951，一次通过） |
-| PR 校验 | `validate` 失败，**但这是预期的**：日志里唯一错误是 `Catalog contains 1 open candidate(s) awaiting DBX Store signing: com.mjj3610.note@0.5.3` |
-| 旧 PR | #484（0.5.2 候选）复核确认未签名、未合并、0 评论后已留言并关闭，避免同一插件出现两个 open 候选 |
+| 源码 | https://github.com/mjj3610/dbx-note/tree/v0.5.4 |
+| Release | https://github.com/mjj3610/dbx-note/releases/tag/v0.5.4 （CI run 42573285429，一次通过，5 平台） |
+| PR 校验 | `validate` 失败，**但这是预期的**：本地用同一份上游 catalog 跑 `validate.mjs`，唯一错误是 `Catalog contains 1 open candidate(s) awaiting DBX Store signing: com.mjj3610.note@0.5.4` |
+| 旧 PR | #486（0.5.3 候选）复核确认 open / 未合并 / 0 评论 / 0 review / diff 仅候选文件后已留言并关闭；#484（0.5.2 候选）此前同样关闭，保证同一插件只有一个 open 候选 |
 | 待办 | 等维护者审核并评论 `/sign`；签名后 `validate` 转绿，由维护者合并 |
 
 候选包指纹（全部来自 CI 的 `release-candidates.json`，未签名）：
 
 | target | sha256 | size |
 | --- | --- | --- |
-| `windows-x64` | `197a4a1fa91a609ff1bd68f2aca2b7bc6cd47edd11e7588a1bc37f5322b0d10a` | 3,771,559 |
-| `darwin-arm64` | `d713b71cceddbc5168fec94080cebe47d90f7e95eca2669ac06d91d9e1b67ffb` | 3,575,306 |
-| `darwin-x64` | `df639499c6cbd996d79299ed3c0bf41bd1adaff796c3e3e0c8f78dfd83ce75d5` | 3,716,319 |
-| `linux-arm64` | `b4040fa6f4998c82a3fb6a69853f292d65cc1f44003f33739270ca1d3ce0b26d` | 3,649,583 |
-| `linux-x64` | `4829bea05b6bf9b5eb0845e9f3299a527bd4aafa454939b2b466cfbe73202275` | 3,715,743 |
+| `windows-x64` | `4962a7d3bd60c991280227b5dc23d64884ae16b41cd93c7a295b0002556b06b3` | 3,783,834 |
+| `darwin-arm64` | `7031aaa9573322a0e0bf9a69f0bc55e8b124821ca0202a4840210dd8d95b4052` | 3,585,188 |
+| `darwin-x64` | `dbb4042594dce5c2c1c0e5d21c4c0273698a2520a2967a2d8ce0c73c787bd2d5` | 3,726,483 |
+| `linux-arm64` | `bdbccaa6da29218c22b360635c109d6bff9eaa5563fdbd598bd7e0ea45c5ed8e` | 3,659,650 |
+| `linux-x64` | `41351a6d148c7396a1acb28c95df3238780c7df5f5bd03e0749850b98f31ed49` | 3,725,682 |
 
-（上一版 0.5.2 的指纹见 `git show 0cc03ef:store-submission/PUBLISH.md`，其 PR #484 已关闭未合并。）
+（上一版 0.5.3 的指纹见 `git show 2aac00e:store-submission/PUBLISH.md`，其 PR #486 已关闭未合并；
+0.5.2 指纹见 `git show 0cc03ef:store-submission/PUBLISH.md`。）
+
+### v0.5.4 发布要点
+
+- 用户确认「历史版本与参考项目一致 + 导出走系统另存为」后重写编辑器底栏两块能力：
+  导出弹系统 `GetSaveFileNameW`、写盘并回显路径、取消不写盘；JSON 为 Tiptap 文档、
+  HTML 内联工作区图片；历史版本改读远端 Git commit 列表（最近 10 条，按 sha 恢复），
+  未配置 Git 远端时入口隐藏。见 `docs/release-notes-v0.5.4.md`。
+- 发布前 `preflight` 通过（1 项提醒：`backend/target` 构建产物；
+  另修正了 `githistory.rs` 注释里被误判为凭据的示例 URL）。
+- 最终回归：cargo check / release build / tsc / vite build、**Sidecar 158/0**、**smoke 12/0**、**e2e 258/0**。
+- 上游商店目录用**现拉的 tarball**（`.tmp/dbx-store-054`），catalog 中本插件 `latestVersion` 仍是 `0.5.0`。
+- 全程 REST API：关闭 #486 用 `.tmp/close-486.mjs`（带守卫），发 Release 用 `.tmp/release-api.mjs`，
+  提 PR 用 `.tmp/store-pr-054.mjs`。
 
 签名后维护者会把 `plugins/com.mjj3610.note.json`、`catalog/index.json` 写回 PR 并删掉
 `candidates/*.json`。作者侧不需要、也不应该自己填 `signingKeyId` 或改 `verified`。
