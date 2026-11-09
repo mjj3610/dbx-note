@@ -359,6 +359,24 @@ export interface PromptSettings {
   organize: string
 }
 
+/** 文件树视图偏好（参考项目 file-more-menu 的「文件视图 / 远程文件 / 知识库」开关） */
+export interface FileViewSettings {
+  /** 排序字段 */
+  sortBy: 'name' | 'mtime' | 'size'
+  /** 升序 / 降序 */
+  sortOrder: 'asc' | 'desc'
+  /** 显示资源文件夹（assets 等纯图片目录） */
+  showAssetsFolders: boolean
+  /** 文件树上标出已收录知识库的笔记 */
+  showKnowledgeBaseStatus: boolean
+  /** 合并远端「仅云端」节点 */
+  showRemoteFiles: boolean
+  /** 上传时包含静态资源 */
+  syncStaticAssets: boolean
+  /** 保存笔记后自动更新知识库索引 */
+  autoUpdateKnowledgeBase: boolean
+}
+
 export interface SettingsSnapshot {
   theme: ThemeMode
   locale: Locale
@@ -386,6 +404,7 @@ export interface SettingsSnapshot {
   imageMethod: ImageMethodSettings
   template: TemplateSettings
   shortcuts: ShortcutSettings
+  fileView: FileViewSettings
 }
 
 /** 内置技能：覆盖最常见的四类写作需求 */
@@ -702,6 +721,15 @@ const DEFAULT_SETTINGS: SettingsSnapshot = {
   imageMethod: { enabled: true },
   template: { items: DEFAULT_TEMPLATES },
   shortcuts: { bindings: DEFAULT_SHORTCUTS },
+  fileView: {
+    sortBy: 'name',
+    sortOrder: 'asc',
+    showAssetsFolders: true,
+    showKnowledgeBaseStatus: false,
+    showRemoteFiles: true,
+    syncStaticAssets: true,
+    autoUpdateKnowledgeBase: false,
+  },
 }
 
 interface SettingsState extends SettingsSnapshot {
@@ -711,6 +739,8 @@ interface SettingsState extends SettingsSnapshot {
   load: () => Promise<void>
   /** 局部更新（自动持久化） */
   patch: (patch: Partial<SettingsSnapshot>) => void
+  /** 文件树视图偏好的局部更新（自动持久化） */
+  patchFileView: (patch: Partial<FileViewSettings>) => void
   patchAi: (patch: Partial<AiSettings>) => void
   /** 新增或整体替换一个厂商（按 id 判断） */
   upsertProvider: (provider: AiProvider) => void
@@ -794,6 +824,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
           prompt: { ...DEFAULT_SETTINGS.prompt, ...(stored.prompt ?? {}) },
           audio: { ...DEFAULT_SETTINGS.audio, ...(stored.audio ?? {}) },
           imageMethod: { ...DEFAULT_SETTINGS.imageMethod, ...(stored.imageMethod ?? {}) },
+          fileView: { ...DEFAULT_SETTINGS.fileView, ...(stored.fileView ?? {}) },
           template: {
             items:
               Array.isArray(stored.template?.items) && stored.template.items.length > 0
@@ -829,6 +860,11 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     if (patch.theme) applyTheme(patch.theme)
     if (patch.locale) localStorageSafe()?.setItem('dbx-note:locale-touched', '1')
     applyEditorPreferences(state)
+    void get().persist()
+  },
+
+  patchFileView: (patch) => {
+    set({ fileView: { ...get().fileView, ...patch } })
     void get().persist()
   },
 
@@ -946,6 +982,7 @@ async function writeSettings(): Promise<void> {
     imageMethod,
     template,
     shortcuts,
+    fileView,
   } = useSettingsStore.getState()
   try {
     await setSetting(STORAGE_KEY, {
@@ -971,6 +1008,7 @@ async function writeSettings(): Promise<void> {
       imageMethod,
       template,
       shortcuts,
+      fileView,
     })
   } catch (error) {
     console.warn('[settings] 保存失败', error)

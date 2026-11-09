@@ -75,6 +75,8 @@ interface NotesState {
   rename: (path: string, newName: string) => Promise<void>
   remove: (path: string) => Promise<void>
   toggleExpand: (path: string) => void
+  /** 「全部折叠」：清空展开集合 */
+  collapseAll: () => void
   expandTo: (path: string) => void
   outline: () => OutlineItem[]
 }
@@ -390,6 +392,12 @@ export const useNotesStore = create<NotesState>((set, get) => ({
       set({ tabs: updateTab(get().tabs, activePath, { dirty: false }) })
       // 开了「自动上传」且当前是对象存储 / WebDAV / 自托管时，排队一次增量上传
       scheduleAutoSync()
+      // 「自动更新知识库」：保存后增量刷新本篇的索引条目，失败只记录、不影响保存
+      if (useSettingsStore.getState().fileView.autoUpdateKnowledgeBase) {
+        void rpc.kbUpsert(activePath).catch((error) => {
+          console.warn('[kb] 增量更新索引失败', error)
+        })
+      }
     } catch (error) {
       set({
         saveState: 'error',
@@ -454,6 +462,8 @@ export const useNotesStore = create<NotesState>((set, get) => ({
       expanded: expanded.includes(path) ? expanded.filter((item) => item !== path) : [...expanded, path],
     })
   },
+
+  collapseAll: () => set({ expanded: [] }),
 
   /** 展开某个路径的所有父级目录 */
   expandTo: (path) => {

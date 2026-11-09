@@ -309,6 +309,54 @@ async function main() {
   }
   check('另存为拒绝白名单外的扩展名', badExtensionBlocked)
 
+  // 回归：四种导出格式各自产出对应后缀与正文，且默认名残留旧后缀时会被规范掉，
+  // 不能出现「点 Markdown 却写出 .html」或「笔记.html.md」这种双后缀。
+  const exportCases = [
+    { extension: 'md', name: '导出自检.md', content: '# Markdown 正文\n', needle: 'Markdown 正文' },
+    { extension: 'html', name: '导出自检.html', content: '<!doctype html><title>x</title><h1>HTML 正文</h1>', needle: 'HTML 正文' },
+    { extension: 'json', name: '导出自检.json', content: '{"type":"doc","content":[]}', needle: '"type":"doc"' },
+  ]
+  for (const item of exportCases) {
+    const result = await call('dialog/saveFile', {
+      defaultName: item.name,
+      extension: item.extension,
+      filterName: `${item.extension.toUpperCase()} 文件`,
+      content: item.content,
+    })
+    check(
+      `导出 ${item.extension} 后缀正确`,
+      result.saved === true && String(result.path ?? '').endsWith(`.${item.extension}`),
+      JSON.stringify(result),
+    )
+    check(
+      `导出 ${item.extension} 正文正确`,
+      Boolean(result.path) && readFileSync(result.path, 'utf8').includes(item.needle),
+    )
+  }
+  const staleName = await call('dialog/saveFile', {
+    defaultName: '导出自检.html',
+    extension: 'md',
+    filterName: 'Markdown 文件',
+    content: '# 旧后缀被规范\n',
+  })
+  check(
+    '默认名带旧后缀时按目标格式规范',
+    String(staleName.path ?? '').endsWith('导出自检.md') &&
+      !String(staleName.path ?? '').includes('.html.md'),
+    JSON.stringify(staleName),
+  )
+  const sanitized = await call('dialog/saveFile', {
+    defaultName: 'a/b:c\\笔记.json',
+    extension: 'md',
+    filterName: 'Markdown 文件',
+    content: '# 净化\n',
+  })
+  check(
+    '非法字符被净化且不带入旧后缀',
+    String(sanitized.path ?? '').endsWith('abc笔记.md'),
+    JSON.stringify(sanitized),
+  )
+
   const tree = await call('fs/tree', {})
   check('文件树包含新建目录', tree.children.some((node) => node.name === '日记' && node.kind === 'folder'))
   const folder = tree.children.find((node) => node.name === '日记')
@@ -331,6 +379,93 @@ async function main() {
   const search = await call('fs/search', { query: 'Rust' })
   check('正文搜索命中', search.items.length === 1 && search.items[0].path === renamed.path)
   check('搜索摘要包含关键词', search.items[0]?.snippet?.includes('Rust'))
+
+  /* ---------- 文件树操作：复制 / 粘贴 / 创建副本 / 导入 / 模板 / 知识库 ---------- */
+  const copied = await call('fs/copy', { from: renamed.path, toDir: '日记', duplicate: true })
+  check('创建副本生成不冲突的名字', copied.path.startsWith('日记/今日总结 副本'), copied.path)
+  check('副本正文与原文一致', (await call('fs/read', { path: copied.path })).content === markdown)
+
+  await call('fs/mkdir', { parent: '', name: '归档' })
+  const pasted = await call('fs/copy', { from: renamed.path, toDir: '归档' })
+  check('粘贴到无同名目录保留原名', pasted.path === '归档/今日总结.md', pasted.path)
+  const pastedAgain = await call('fs/copy', { from: renamed.path, toDir: '归档' })
+  check('目标同名时自动退让', /归档\/今日总结 副本.*\.md$/.test(pastedAgain.path), pastedAgain.path)
+
+  const moved = await call('fs/move', { from: copied.path, toDir: '归档' })
+  check('剪切粘贴移动到目标目录', moved.path.startsWith('归档/'), moved.path)
+  let movedAway = false
+  try {
+    await call('fs/read', { path: copied.path })
+  } catch {
+    movedAway = true
+  }
+  check('移动后源路径不再存在', movedAway)
+
+  await call('fs/mkdir', { parent: '归档', name: '子目录' })
+  let selfMoveBlocked = false
+  try {
+    await call('fs/move', { from: '归档', toDir: '归档/子目录' })
+  } catch {
+    selfMoveBlocked = true
+  }
+  check('拒绝把目录移动进自身', selfMoveBlocked)
+
+  const imported = await call('fs/import', {
+    target: '',
+    files: [
+      { name: '导入/一篇笔记.md', content: '# 导入正文\n' },
+      { name: '../../越界.exe', content: 'x' },
+      { name: '导入/bad.exe', content: 'x' },
+    ],
+  })
+  check('批量导入只写入白名单内的笔记', imported.imported === 1 && imported.skipped === 2, JSON.stringify(imported))
+  check('导入路径逐段净化并阻止穿越', imported.paths[0] === '导入/一篇笔记.md', JSON.stringify(imported.paths))
+  check(
+    '导入正文可直接读取',
+    (await call('fs/read', { path: '导入/一篇笔记.md' })).content === '# 导入正文\n',
+  )
+
+  const templatesEmpty = await call('fs/templates')
+  check('模板列表在 templates/ 不存在时返回空', Array.isArray(templatesEmpty.items) && templatesEmpty.items.length === 0)
+  await call('fs/create', { kind: 'file', parent: 'templates', name: '会议纪要', content: '# 会议纪要\n' })
+  const templates = await call('fs/templates')
+  check('模板列表读到 Markdown 模板', templates.items.some((item) => item.name === '会议纪要'), JSON.stringify(templates))
+
+  // 不真的弹资源管理器（自检不该抢桌面），用不存在的路径验证 RPC 已注册且会校验
+  let revealMissingBlocked = false
+  try {
+    await call('fs/reveal', { path: '不存在的条目.md' })
+  } catch {
+    revealMissingBlocked = true
+  }
+  check('查看目录拒绝不存在的条目', revealMissingBlocked)
+
+  const kbBefore = await call('kb/status')
+  check('知识库索引初始为空', kbBefore.count === 0, JSON.stringify(kbBefore))
+  const reindexed = await call('kb/reindex')
+  check('全部重新计算收录工作区笔记', reindexed.count >= 3, JSON.stringify(reindexed))
+  const kbAfter = await call('kb/status')
+  check('索引状态列出已收录路径', kbAfter.paths.includes(renamed.path), JSON.stringify(kbAfter))
+  const upserted = await call('kb/upsert', { path: '导入/一篇笔记.md' })
+  check('单篇更新索引后条目数不减少', upserted.count >= reindexed.count, JSON.stringify(upserted))
+  let invalidUpsertBlocked = false
+  try {
+    await call('kb/upsert', { path: '日记' })
+  } catch {
+    invalidUpsertBlocked = true
+  }
+  check('拒绝把目录写进知识库索引', invalidUpsertBlocked)
+  const kbSnapshot = await call('kb/export')
+  check('上传知识库导出合法 JSON', JSON.parse(kbSnapshot.json).docs.length >= 3)
+  const kbRestored = await call('kb/import', { json: kbSnapshot.json })
+  check('下载知识库按快照恢复索引', kbRestored.count >= 3, JSON.stringify(kbRestored))
+  let badKbBlocked = false
+  try {
+    await call('kb/import', { json: '{"oops":1}' })
+  } catch {
+    badKbBlocked = true
+  }
+  check('拒绝缺少 docs 的知识库快照', badKbBlocked)
 
   // 记录与标签
   const record = await call('record/create', {

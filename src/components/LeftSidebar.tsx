@@ -3,11 +3,14 @@ import { FileText, FolderPlus, Highlighter, ListTree, Palette, Plus, RefreshCw, 
 
 import { Button } from '@/components/ui/button'
 import { Hint } from '@/components/ui/tooltip'
+import { applyFileView } from '@/lib/tree'
 import { cn, debounce } from '@/lib/utils'
 import { useT } from '@/lib/useT'
 import { currentFolder, useNotesStore } from '@/stores/notes'
 import { useRecordsStore } from '@/stores/records'
+import { useSettingsStore } from '@/stores/settings'
 import { useUiStore, type SidebarTab } from '@/stores/ui'
+import { FileMoreMenu } from './FileMoreMenu'
 import { FileTree } from './FileTree'
 import { RecordPanel } from './RecordPanel'
 import { CanvasPanel } from './canvas/CanvasPanel'
@@ -34,6 +37,7 @@ export function LeftSidebar() {
   const loadTree = useNotesStore((state) => state.loadTree)
   const setRecordFilter = useRecordsStore((state) => state.setFilter)
   const loadRecords = useRecordsStore((state) => state.load)
+  const fileView = useSettingsStore((state) => state.fileView)
 
   // 记录搜索走后端，输入防抖 260ms
   const pushRecordQuery = useMemo(
@@ -44,7 +48,11 @@ export function LeftSidebar() {
     if (tab === 'records') pushRecordQuery(keyword)
   }, [keyword, pushRecordQuery, tab])
 
-  const filteredTree = useMemo(() => (keyword.trim() ? filterTree(tree, keyword.trim().toLowerCase()) : tree), [tree, keyword])
+  // 先按搜索词过滤，再套用「文件视图」偏好（排序 / 隐藏资源文件夹 / 隐藏仅云端节点）
+  const filteredTree = useMemo(() => {
+    const searched = keyword.trim() ? filterTree(tree, keyword.trim().toLowerCase()) : tree
+    return applyFileView(searched, fileView)
+  }, [tree, keyword, fileView])
 
   return (
     <div className="flex h-full min-h-0 flex-col border-r border-border bg-background">
@@ -112,11 +120,14 @@ export function LeftSidebar() {
             </Hint>
           ) : null}
           {tab === 'files' ? (
-            <Hint label={t('common.refresh')}>
-              <Button variant="ghost" size="icon-sm" aria-label={t('common.refresh')} onClick={() => void loadTree()}>
-                <RefreshCw className="size-4" />
-              </Button>
-            </Hint>
+            <>
+              <Hint label={t('common.refresh')}>
+                <Button variant="ghost" size="icon-sm" aria-label={t('common.refresh')} onClick={() => void loadTree()}>
+                  <RefreshCw className="size-4" />
+                </Button>
+              </Hint>
+              <FileMoreMenu />
+            </>
           ) : null}
         </div>
       </div>

@@ -1935,6 +1935,87 @@ check(
   exportedMd.some((name) => /^# /m.test(readFileSync(join(EXPORT_DIR, name), 'utf8'))),
 )
 
+// 回归用户反馈「几种导出类型点完都是 html」：每种格式必须落盘对应后缀与正文，
+// 不能串到 html，也不能出现「笔记.html.md」这类双后缀。
+for (const format of ['html', 'json']) {
+  const before = existsSync(EXPORT_DIR) ? readdirSync(EXPORT_DIR) : []
+  await page.locator('[data-footer-export]').click()
+  await page.waitForTimeout(250)
+  await page.locator(`[data-export-format="${format}"]`).click()
+  await page.waitForTimeout(800)
+  const created = existsSync(EXPORT_DIR)
+    ? readdirSync(EXPORT_DIR).filter((name) => !before.includes(name))
+    : []
+  check(
+    `导出 ${format.toUpperCase()} 生成 .${format} 文件`,
+    created.some((name) => name.endsWith(`.${format}`)),
+    created.join(','),
+  )
+  check(
+    `导出 ${format.toUpperCase()} 未错误产出 HTML`,
+    !created.some((name) => /\.html(\.|$)/.test(name)),
+    created.join(','),
+  )
+  check(
+    `导出 ${format.toUpperCase()} 未生成双后缀文件`,
+    !created.some((name) => /\.(md|html|json)\.(md|html|json)$/.test(name)),
+    created.join(','),
+  )
+  const target = created.find((name) => name.endsWith(`.${format}`))
+  if (target) {
+    const body = readFileSync(join(EXPORT_DIR, target), 'utf8')
+    if (format === 'html') check('导出 HTML 含文档骨架与正文', /<html/i.test(body) && body.includes('本周完成'))
+    else check('导出 JSON 是 Tiptap 文档', (() => { try { return JSON.parse(body).type === 'doc' } catch { return false } })())
+  }
+}
+
+/* ---------- 文件树「更多」菜单与右键菜单（对齐参考项目） ---------- */
+
+await page.getByRole('button', { name: '文件', exact: true }).first().click()
+await page.waitForTimeout(400)
+check('文件树工具栏出现「更多操作」', (await page.locator('[data-files-more]').count()) === 1)
+await page.locator('[data-files-more]').click()
+await page.waitForTimeout(350)
+check('更多菜单含文件视图 / 远程 / 知识库三组', (await page.locator('[data-files-more-menu]').count()) === 1)
+check('更多菜单含排序入口', (await page.locator('[data-files-sort]').count()) === 1)
+check('更多菜单含全部折叠', (await page.locator('[data-files-collapse-all]').count()) === 1)
+for (const key of ['show-assets', 'show-kb', 'show-remote', 'sync-assets', 'auto-kb']) {
+  check(`更多菜单含开关 ${key}`, (await page.locator(`[data-files-${key}]`).count()) === 1)
+}
+for (const key of ['reindex', 'upload-kb', 'download-kb', 'import-notes', 'import-markdown', 'import-notion']) {
+  check(`更多菜单含动作 ${key}`, (await page.locator(`[data-files-${key}]`).count()) === 1)
+}
+// 排序子菜单：切到「修改时间」并验证设置已持久化
+await page.locator('[data-files-sort]').hover()
+await page.waitForTimeout(400)
+if ((await page.locator('[data-files-sort-by]').count()) === 0) {
+  await page.locator('[data-files-sort]').click()
+  await page.waitForTimeout(400)
+}
+check('排序子菜单列出三种字段', (await page.locator('[data-files-sort-by]').count()) === 3)
+await page.locator('[data-files-sort-by="mtime"]').click()
+await page.waitForTimeout(400)
+const storedFileView = await rpcFromPage('settings/get', { key: 'app.settings' })
+const fileViewValue = typeof storedFileView === 'string' ? JSON.parse(storedFileView) : storedFileView
+check('排序偏好写入设置', (fileViewValue?.value?.fileView ?? fileViewValue?.fileView)?.sortBy === 'mtime',
+  JSON.stringify(fileViewValue?.value?.fileView ?? fileViewValue?.fileView))
+await page.keyboard.press('Escape')
+await page.waitForTimeout(300)
+
+// 右键菜单：新建 / 展开折叠 / 查看目录 / 模板 / 知识库 / 剪贴板 / 重命名 / 删除
+await page.locator('[data-tree-node="周会纪要.md"]').click({ button: 'right' })
+await page.waitForTimeout(400)
+check('右键菜单已打开', (await page.locator('[data-tree-menu]').count()) === 1)
+for (const action of [
+  'new-file', 'new-folder', 'reveal', 'template', 'kb',
+  'cut', 'copy', 'duplicate', 'paste', 'rename', 'delete',
+]) {
+  check(`右键菜单含 ${action}`, (await page.locator(`[data-tree-action="${action}"]`).count()) === 1)
+}
+check('右键菜单显示 F2 / Del 快捷键', (await page.locator('[data-tree-menu]').innerText()).includes('F2'))
+await page.keyboard.press('Escape')
+await page.waitForTimeout(300)
+
 /* ---------- 历史版本：准备真实 Git 提交历史（对齐参考项目远端 commit 列表） ---------- */
 
 /** 在工作区里跑 git；e2e 里 origin 是示例地址，devhost 已开 DBX_NOTE_HISTORY_OFFLINE 跳过联网 */

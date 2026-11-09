@@ -179,3 +179,68 @@ export function ContextMenuLabel({
     />
   )
 }
+
+/** 右键菜单里的开关项（对应参考项目的显示开关） */
+export function ContextMenuCheckboxItem({
+  className,
+  children,
+  ...props
+}: React.ComponentPropsWithoutRef<typeof ContextPrimitive.CheckboxItem>) {
+  return (
+    <ContextPrimitive.CheckboxItem className={cn(itemClass, 'pl-8', className)} {...props}>
+      <span className="absolute left-2 flex size-4 items-center justify-center">
+        <ContextPrimitive.ItemIndicator>
+          <Check className="size-3.5 text-foreground" />
+        </ContextPrimitive.ItemIndicator>
+      </span>
+      {children}
+    </ContextPrimitive.CheckboxItem>
+  )
+}
+
+/** 右键菜单的二级菜单（「排序 ›」「从模板新建 ›」「知识库 ›」） */
+export const ContextMenuSub = ContextPrimitive.Sub
+
+export function ContextMenuSubTrigger({
+  className,
+  children,
+  ...props
+}: React.ComponentPropsWithoutRef<typeof ContextPrimitive.SubTrigger>) {
+  return (
+    <ContextPrimitive.SubTrigger
+      className={cn(itemClass, 'data-[state=open]:bg-muted', className)}
+      {...props}
+    >
+      {children}
+      <ChevronRight className="ml-auto size-3.5" />
+    </ContextPrimitive.SubTrigger>
+  )
+}
+
+export function ContextMenuSubContent({
+  className,
+  ...props
+}: React.ComponentPropsWithoutRef<typeof ContextPrimitive.SubContent>) {
+  return (
+    <ContextPrimitive.Portal>
+      <ContextPrimitive.SubContent
+        sideOffset={4}
+        className={cn(contentClass, 'min-w-40', className)}
+        {...props}
+      />
+    </ContextPrimitive.Portal>
+  )
+}
+
+/** 菜单右侧的快捷键提示（Ctrl+X / F2 / Del） */
+export function ContextMenuShortcut({
+  className,
+  ...props
+}: React.HTMLAttributes<HTMLSpanElement>) {
+  return (
+    <span
+      className={cn('ml-auto pl-4 text-[11px] tracking-widest text-muted-foreground', className)}
+      {...props}
+    />
+  )
+}

@@ -277,21 +277,77 @@ async function saveTextExport(
   return { format, saved: true, filename, fallback: true }
 }
 
-/** 等一张图片加载完（失败或超时都继续，不阻塞打印） */
-function waitForImage(image: HTMLImageElement): Promise<void> {
-  if (image.complete) return Promise.resolve()
-  return new Promise((resolve) => {
-    image.onload = () => resolve()
-    image.onerror = () => resolve()
-    window.setTimeout(resolve, IMAGE_LOAD_TIMEOUT_MS)
-  })
+/** 等一份待打印文档里的图片与字体就绪（失败或超时都继续，不阻塞打印） */
+async function waitForPrintDocument(doc: Document): Promise<void> {
+  await Promise.all(
+    Array.from(doc.images).map(
+      (image) =>
+        new Promise<void>((resolve) => {
+          if (image.complete) return resolve()
+          image.onload = () => resolve()
+          image.onerror = () => resolve()
+          window.setTimeout(resolve, IMAGE_LOAD_TIMEOUT_MS)
+        }),
+    ),
+  )
+  if (doc.fonts) {
+    await Promise.race([
+      doc.fonts.ready,
+      new Promise<void>((resolve) => window.setTimeout(resolve, 1_000)),
+    ])
+  }
 }
 
 /**
- * 用隐藏 iframe 打开系统打印窗口（用户选择「另存为 PDF」）。
+ * 打开系统打印窗口（用户选择「另存为 PDF」）。
+ *
+ * 优先用**顶层独立窗口**：DBX 插件页跑在 iframe 里，iframe 的 `print()` 常被宿主
+ * 的 sandbox / 弹窗策略静默吞掉 —— 点了 PDF 什么都没发生，随后又降级导出 HTML，
+ * 用户就会以为「几种格式都导出成了 html」。顶层窗口不受 iframe 沙箱约束。
+ * 顶层窗口不可用时再退回隐藏 iframe；两条路都失败才返回 false 让调用方明确降级。
+ *
  * @returns 是否成功唤起打印
  */
 export async function printPdf(html: string): Promise<boolean> {
+  // 1) 顶层窗口，最接近参考项目 Tauri 的原生打印窗口
+  let popup: Window | null = null
+  try {
+    popup = window.open('', '_blank', 'width=980,height=760')
+  } catch {
+    popup = null
+  }
+  if (popup) {
+    try {
+      const doc = popup.document
+      doc.open()
+      doc.write(html)
+      doc.close()
+      await waitForPrintDocument(doc)
+      if (typeof popup.print === 'function') {
+        popup.focus()
+        popup.print()
+        // 用户打印完（或取消）后关掉这个临时窗口，不留在标签页里
+        popup.addEventListener('afterprint', () => popup?.close(), { once: true })
+        window.setTimeout(() => {
+          try {
+            popup?.close()
+          } catch {
+            /* 已被用户手动关闭 */
+          }
+        }, PRINT_FRAME_CLEANUP_MS)
+        return true
+      }
+    } catch {
+      /* 宿主可能禁止写 popup document，继续走 iframe */
+    }
+    try {
+      popup.close()
+    } catch {
+      /* ignore */
+    }
+  }
+
+  // 2) 隐藏 iframe 兜底
   const frame = document.createElement('iframe')
   frame.setAttribute('aria-hidden', 'true')
   frame.style.cssText =
@@ -307,8 +363,7 @@ export async function printPdf(html: string): Promise<boolean> {
     doc.open()
     doc.write(html)
     doc.close()
-    await Promise.all(Array.from(doc.images).map(waitForImage))
-    if (doc.fonts) await doc.fonts.ready
+    await waitForPrintDocument(doc)
 
     let cleanedUp = false
     const cleanup = () => {
@@ -364,16 +419,18 @@ export async function exportMarkdown(format: ExportFormat, source: NoteSource): 
       format,
     )
   }
-  // PDF：唤起系统打印窗口；环境不支持时退化为导出 HTML，用户可在浏览器里打印成 PDF
-  if (await printPdf(await exportHtmlDocument(source))) {
+  // PDF：唤起系统打印窗口；环境不支持时导出「可打印 HTML」，
+  // 用 .print.html 后缀与普通 HTML 导出区分，避免用户以为点 PDF 却导出了 HTML
+  const printableHtml = await exportHtmlDocument(source)
+  if (await printPdf(printableHtml)) {
     return { format, saved: true, printed: true, filename: `${base}.pdf` }
   }
   const fallback = await saveTextExport(
-    await exportHtmlDocument(source),
-    `${base}.html`,
+    printableHtml,
+    `${base}.print.html`,
     'html',
     'text/html;charset=utf-8',
-    'HTML 文件',
+    '可打印 HTML 文件',
     format,
   )
   return { ...fallback, fallback: true }

@@ -15,6 +15,7 @@ mod backup;
 mod canvas;
 mod db;
 mod files;
+mod fileops;
 mod githistory;
 mod gitsync;
 mod imagehost;
@@ -67,7 +68,7 @@ use serde_json::{json, Value};
 
 /// 插件标识与版本，必须与 manifest.json 保持一致
 const PLUGIN_ID: &str = "com.mjj3610.note";
-pub(crate) const PLUGIN_VERSION: &str = "0.5.4";
+pub(crate) const PLUGIN_VERSION: &str = "0.5.5";
 /// 协议版本
 const PROTOCOL_VERSION: i64 = 1;
 
@@ -315,6 +316,17 @@ fn dispatch(app: &App, method: &str, params: Value) -> RpcResult {
         "fs/delete" => files::delete_entry(app, &params),
         "fs/search" => files::search_files(app, &params),
         "fs/stat" => files::stat_entry(app, &params),
+        // 文件树「更多操作」/ 右键菜单（参考项目 file-more-menu.tsx / file-item.tsx）
+        "fs/copy" => fileops::copy_entry(app, &params),
+        "fs/move" => fileops::move_entry(app, &params),
+        "fs/reveal" => fileops::reveal_entry(app, &params),
+        "fs/import" => fileops::import_entries(app, &params),
+        "fs/templates" => fileops::list_templates(app),
+        "kb/status" => fileops::kb_status(app),
+        "kb/reindex" => fileops::kb_reindex(app),
+        "kb/upsert" => fileops::kb_upsert(app, &params),
+        "kb/export" => fileops::kb_export(app),
+        "kb/import" => fileops::kb_import(app, &params),
         "image/read" => files::read_image(app, &params),
         "image/save" => files::save_image(app, &params),
         "image/upload" => imagehost::upload(&params),

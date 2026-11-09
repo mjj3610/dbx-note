@@ -322,6 +322,91 @@ export function statEntry(path: string): Promise<{ exists: boolean; size: number
   return call('fs/stat', { path })
 }
 
+/* ---------------- 文件树操作（参考项目 file-more-menu / file-item） ---------------- */
+
+/** 工作区 templates/ 下的 Markdown 模板 */
+export interface TemplateItem {
+  name: string
+  path: string
+  content: string
+}
+
+/** 待导入的一项：文本走 content，二进制走 contentBase64 */
+export interface ImportEntry {
+  name: string
+  content?: string
+  contentBase64?: string
+}
+
+export interface ImportResult {
+  imported: number
+  skipped: number
+  paths: string[]
+}
+
+/** 知识库索引状态（文件树「显示知识库状态」用） */
+export interface KbStatus {
+  count: number
+  paths: string[]
+  updatedAt: number
+}
+
+/** 复制 / 创建副本；duplicate=true 时自动生成「副本」名 */
+export function copyEntry(params: {
+  from: string
+  toDir?: string
+  duplicate?: boolean
+}): Promise<{ path: string; name: string }> {
+  return call('fs/copy', params, WRITE_TIMEOUT)
+}
+
+/** 剪切后粘贴：把条目移动到目标目录 */
+export function moveEntry(params: { from: string; toDir: string }): Promise<{ path: string; name: string }> {
+  return call('fs/move', params, WRITE_TIMEOUT)
+}
+
+/** 在系统文件管理器里选中该条目 */
+export function revealEntry(path: string): Promise<{ ok: boolean; path: string }> {
+  return call('fs/reveal', { path })
+}
+
+/** 批量导入（前端已解包 / 转码） */
+export function importEntries(params: {
+  target: string
+  files: ImportEntry[]
+  overwrite?: boolean
+}): Promise<ImportResult> {
+  return call('fs/import', params, WRITE_TIMEOUT)
+}
+
+export function listTemplates(): Promise<{ items: TemplateItem[] }> {
+  return call('fs/templates', {})
+}
+
+export function kbStatus(): Promise<KbStatus> {
+  return call('kb/status', {})
+}
+
+/** 全量重建索引（「全部重新计算」） */
+export function kbReindex(): Promise<{ count: number; updatedAt: number }> {
+  return call('kb/reindex', {}, WRITE_TIMEOUT)
+}
+
+/** 单篇增量更新（「自动更新知识库」开启时保存后调用） */
+export function kbUpsert(path: string): Promise<{ count: number }> {
+  return call('kb/upsert', { path })
+}
+
+/** 取完整索引 JSON，供「上传知识库」另存为 */
+export function kbExport(): Promise<{ json: string }> {
+  return call('kb/export', {})
+}
+
+/** 从快照恢复索引（「下载知识库」） */
+export function kbImport(json: string): Promise<{ count: number }> {
+  return call('kb/import', { json }, WRITE_TIMEOUT)
+}
+
 export function saveImage(
   name: string,
   dataBase64: string,

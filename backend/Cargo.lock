@@ -328,7 +328,7 @@ checksum = "0c87e182de0887fd5361989c677c4e8f5000cd9491d6d563161a8f3a5519fc7f"
 
 [[package]]
 name = "dbx-note-backend"
-version = "0.5.4"
+version = "0.5.5"
 dependencies = [
  "base64 0.22.1",
  "chrono",

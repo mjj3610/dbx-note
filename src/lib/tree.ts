@@ -190,3 +190,94 @@ export function findTreeNode(nodes: TreeNode[], path: string): TreeNode | null {
   }
   return null
 }
+
+/* ---------------- 文件树视图偏好（参考项目 file-more-menu） ---------------- */
+
+export type FileSortBy = 'name' | 'mtime' | 'size'
+
+export interface FileViewOptions {
+  sortBy: FileSortBy
+  sortOrder: 'asc' | 'desc'
+  /** 显示 assets 等纯图片资源文件夹 */
+  showAssetsFolders: boolean
+  /** 显示「仅云端」节点 */
+  showRemoteFiles: boolean
+}
+
+const ASSET_FOLDER_NAMES = new Set([
+  'assets',
+  'asset',
+  'images',
+  'image',
+  'img',
+  'static',
+  'media',
+  '附件',
+  '资源',
+])
+
+/** 目录里是否只有图片（含子目录），用于识别「资源文件夹」 */
+function isAssetsFolder(node: TreeNode): boolean {
+  if (node.kind !== 'folder') return false
+  if (ASSET_FOLDER_NAMES.has(node.name.toLowerCase())) return true
+  let sawFile = false
+  let sawNonImage = false
+  const walk = (list: TreeNode[]) => {
+    for (const item of list) {
+      if (item.kind === 'folder') walk(item.children ?? [])
+      else {
+        sawFile = true
+        if (item.kind !== 'image') sawNonImage = true
+      }
+    }
+  }
+  walk(node.children ?? [])
+  return sawFile && !sawNonImage
+}
+
+/**
+ * 应用视图偏好：过滤隐藏节点 + 按设置排序。
+ *
+ * 返回新数组，不改传入的树；目录始终排在文件前面（与参考项目一致），
+ * 组内再按名称 / 修改时间 / 大小和升降序排列。
+ */
+export function applyFileView(nodes: TreeNode[], options: FileViewOptions): TreeNode[] {
+  const result: TreeNode[] = []
+  for (const node of nodes) {
+    if (!options.showRemoteFiles && node.remoteOnly) continue
+    if (node.kind === 'folder' && !options.showAssetsFolders && isAssetsFolder(node)) continue
+    const next: TreeNode = node.children
+      ? { ...node, children: applyFileView(node.children, options) }
+      : { ...node }
+    result.push(next)
+  }
+  const factor = options.sortOrder === 'asc' ? 1 : -1
+  result.sort((left, right) => {
+    if (left.kind === 'folder' && right.kind !== 'folder') return -1
+    if (left.kind !== 'folder' && right.kind === 'folder') return 1
+    let value = 0
+    if (options.sortBy === 'mtime') {
+      value = (left.mtime ?? 0) - (right.mtime ?? 0)
+    } else if (options.sortBy === 'size') {
+      value = (left.size ?? 0) - (right.size ?? 0)
+    }
+    if (value === 0) value = left.name.localeCompare(right.name, 'zh-CN')
+    return value * factor
+  })
+  return result
+}
+
+/** 收集树里所有文件夹路径，供「全部折叠」与粘贴目标使用 */
+export function collectFolderPaths(nodes: TreeNode[]): string[] {
+  const result: string[] = []
+  const walk = (list: TreeNode[]) => {
+    for (const node of list) {
+      if (node.kind === 'folder') {
+        result.push(node.path)
+        walk(node.children ?? [])
+      }
+    }
+  }
+  walk(nodes)
+  return result
+}

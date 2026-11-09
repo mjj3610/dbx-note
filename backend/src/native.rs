@@ -526,6 +526,52 @@ mod win {
     /// @param filter_name  过滤器显示名
     /// @param content      待写盘的 UTF-8 正文
     /// @return 确认时返回实际保存路径；取消返回 `None`
+    /// 「另存为」对话框 hook：把窗口置到最上层并抢焦点。
+    ///
+    /// Sidecar 是后台进程、没有前台窗口权限；之前 `hwndOwner = NULL` 时
+    /// `GetSaveFileNameW` 的对话框会落在 DBX 主窗口下面，用户看不到。
+    /// `SetWindowPos(HWND_TOPMOST)` 不需要前台权限，能可靠把模态框提到最上层。
+    unsafe extern "system" fn save_dialog_hook(
+        hwnd: windows_sys::Win32::Foundation::HWND,
+        message: u32,
+        _wparam: windows_sys::Win32::Foundation::WPARAM,
+        _lparam: windows_sys::Win32::Foundation::LPARAM,
+    ) -> usize {
+        use windows_sys::Win32::UI::WindowsAndMessaging::{
+            BringWindowToTop, SetForegroundWindow, SetWindowPos, HWND_TOPMOST, SWP_NOMOVE,
+            SWP_NOSIZE, SWP_SHOWWINDOW,
+        };
+        /// 对话框刚创建、还没显示时介入
+        const WM_INITDIALOG: u32 = 0x0110;
+        if message == WM_INITDIALOG {
+            SetWindowPos(
+                hwnd,
+                HWND_TOPMOST,
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW,
+            );
+            BringWindowToTop(hwnd);
+            SetForegroundWindow(hwnd);
+        }
+        0
+    }
+
+    /// 把用户选定的路径规范成目标格式的后缀。
+    ///
+    /// 之前只在「没有后缀」时追加，遇到 `笔记.html` 配 `md` 会写出 `笔记.html.md`，
+    /// 或者对话框沿用上次的过滤器时把 Markdown 存成 `.html`。这里一律先去掉旧后缀。
+    pub(super) fn normalize_export_path(path: &str, extension: &str) -> String {
+        let target = format!(".{extension}");
+        if path.to_ascii_lowercase().ends_with(&target) {
+            return path.to_string();
+        }
+        let stem = std::path::Path::new(path).with_extension("");
+        format!("{}.{extension}", stem.to_string_lossy())
+    }
+
     pub fn save_text_dialog(
         default_name: &str,
         extension: &str,
@@ -533,13 +579,15 @@ mod win {
         content: &str,
     ) -> Result<Option<String>, String> {
         use std::os::windows::ffi::OsStrExt;
+        use windows_sys::Win32::Foundation::HWND;
         use windows_sys::Win32::System::Com::{
             CoInitializeEx, CoUninitialize, COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE,
         };
         use windows_sys::Win32::UI::Controls::Dialogs::{
-            GetSaveFileNameW, OFN_EXPLORER, OFN_NOCHANGEDIR, OFN_OVERWRITEPROMPT,
-            OFN_PATHMUSTEXIST, OPENFILENAMEW,
+            GetSaveFileNameW, OFN_ENABLEHOOK, OFN_EXPLORER, OFN_NOCHANGEDIR,
+            OFN_OVERWRITEPROMPT, OFN_PATHMUSTEXIST, OPENFILENAMEW,
         };
+        use windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
 
         let mut file: Vec<u16> = default_name
             .encode_utf16()
@@ -561,18 +609,31 @@ mod win {
                 .collect::<Vec<u16>>()
         });
 
+        // 先把宿主窗口激活到前台（内部会处理前台锁），再以它为 owner。
+        // 没有 owner 时系统会把对话框当成无主窗口，容易落在主窗口下面。
+        focus_host();
+        let owner: HWND = unsafe { GetForegroundWindow() };
+
         let mut ofn: OPENFILENAMEW = unsafe { std::mem::zeroed() };
         ofn.lStructSize = std::mem::size_of::<OPENFILENAMEW>() as u32;
-        ofn.hwndOwner = std::ptr::null_mut();
+        ofn.hwndOwner = owner;
         ofn.lpstrFilter = filter.as_ptr();
         ofn.lpstrFile = file.as_mut_ptr();
         ofn.nMaxFile = file.len() as u32;
         ofn.lpstrDefExt = ext.as_ptr();
         ofn.lpstrTitle = title.as_ptr();
+        // 明确选中第一个过滤器，避免某些 Windows 版本沿用上次的「所有文件」
+        ofn.nFilterIndex = 1;
+        // 置顶 hook：TOPMOST 不需要前台权限，保证对话框一定可见
+        ofn.lpfnHook = Some(save_dialog_hook);
         if let Some(dir) = downloads.as_ref() {
             ofn.lpstrInitialDir = dir.as_ptr();
         }
-        ofn.Flags = OFN_EXPLORER | OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
+        ofn.Flags = OFN_EXPLORER
+            | OFN_ENABLEHOOK
+            | OFN_OVERWRITEPROMPT
+            | OFN_PATHMUSTEXIST
+            | OFN_NOCHANGEDIR;
 
         // Vista 之后 GetSaveFileName 内部就是 IFileDialog，线程未初始化 COM 会静默返回 0
         let hr = unsafe {
@@ -591,22 +652,48 @@ mod win {
         }
 
         let end = file.iter().position(|unit| *unit == 0).unwrap_or(file.len());
-        let mut path = String::from_utf16_lossy(&file[..end]);
+        let path = String::from_utf16_lossy(&file[..end]);
         if path.is_empty() {
             return Ok(None);
         }
-        // 与参考项目 ensureExtension 一致：用户删掉后缀时补回来
-        if !path.to_ascii_lowercase().ends_with(&format!(".{extension}")) {
-            path.push('.');
-            path.push_str(extension);
-        }
+        // 与参考项目 ensureExtension 一致：一律按目标格式规范后缀
+        let path = normalize_export_path(&path, extension);
         std::fs::write(&path, content).map_err(|error| format!("写入失败：{error}"))?;
         Ok(Some(path))
     }
 }
 
-/// 把 PNG（base64）写进系统剪贴板，供截图工具的「复制」使用
-pub fn write_clipboard(params: &serde_json::Value) -> RpcResult {
+    #[cfg(all(test, windows))]
+    mod dialog_tests {
+        #[test]
+        fn export_path_always_ends_with_target_extension() {
+            use super::win::normalize_export_path;
+            assert_eq!(
+                normalize_export_path(r"C:\Users\me\Downloads\笔记.html", "md"),
+                r"C:\Users\me\Downloads\笔记.md"
+            );
+            assert_eq!(
+                normalize_export_path(r"C:\Users\me\Downloads\笔记", "json"),
+                r"C:\Users\me\Downloads\笔记.json"
+            );
+            assert_eq!(
+                normalize_export_path(r"C:\Users\me\Downloads\笔记.md", "md"),
+                r"C:\Users\me\Downloads\笔记.md"
+            );
+        }
+
+        #[test]
+        fn export_name_never_keeps_a_foreign_extension() {
+            use super::sanitize_export_name;
+            assert_eq!(sanitize_export_name("笔记.html", "md"), "笔记.md");
+            assert_eq!(sanitize_export_name("笔记.md", "md"), "笔记.md");
+            assert_eq!(sanitize_export_name("", "html"), "document.html");
+            assert_eq!(sanitize_export_name("  a/b:c\\d.json  ", "json"), "abcd.json");
+        }
+    }
+
+    /// 把 PNG（base64）写进系统剪贴板，供截图工具的「复制」使用
+    pub fn write_clipboard(params: &serde_json::Value) -> RpcResult {
     let encoded = params
         .get("dataBase64")
         .and_then(|value| value.as_str())
@@ -976,13 +1063,13 @@ fn sanitize_export_name(raw: &str, extension: &str) -> String {
         .chars()
         .filter(|ch| !matches!(ch, '/' | '\\' | ':' | '\0') && !ch.is_control())
         .collect();
-    let name = name.trim().to_string();
-    let name = if name.is_empty() { "document".to_string() } else { name };
-    if name.to_ascii_lowercase().ends_with(&format!(".{extension}")) {
-        name
-    } else {
-        format!("{name}.{extension}")
-    }
+    // 先剥掉任何已有后缀再按目标格式重建：避免 `笔记.html` + md 变成 `笔记.html.md`
+    let stem = std::path::Path::new(name.trim())
+        .file_stem()
+        .map(|value| value.to_string_lossy().trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "document".to_string());
+    format!("{stem}.{extension}")
 }
 
 /// 兜底：进程退出前停掉录音线程

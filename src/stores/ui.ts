@@ -55,6 +55,10 @@ interface UiState {
   voiceOpen: boolean
   /** 同步冲突弹窗：本地与远端内容都在改，等用户选保留哪边 */
   syncConflict: { path: string; local: string; remote: string } | null
+  /** 文件树剪贴板：剪切 / 复制后由「粘贴」落到目标目录 */
+  fileClipboard: { mode: 'cut' | 'copy'; path: string } | null
+  /** 文件树当前选中的节点，用于 F2 / Delete / Ctrl+X/C/V 快捷键 */
+  selectedTreePath: string | null
 
   setTab: (tab: SidebarTab) => void
   toggleLeft: () => void
@@ -75,6 +79,8 @@ interface UiState {
   setVoiceOpen: (open: boolean) => void
   showSyncConflict: (conflict: { path: string; local: string; remote: string }) => void
   closeSyncConflict: () => void
+  setFileClipboard: (clip: { mode: 'cut' | 'copy'; path: string } | null) => void
+  setSelectedTreePath: (path: string | null) => void
 }
 
 export const useUiStore = create<UiState>((set) => ({
@@ -93,6 +99,8 @@ export const useUiStore = create<UiState>((set) => ({
   imagePreview: null,
   voiceOpen: false,
   syncConflict: null,
+  fileClipboard: null,
+  selectedTreePath: null,
 
   setTab: (tab) => set({ tab }),
   toggleLeft: () => set((state) => ({ leftVisible: !state.leftVisible })),
@@ -113,4 +121,6 @@ export const useUiStore = create<UiState>((set) => ({
   setVoiceOpen: (open) => set({ voiceOpen: open }),
   showSyncConflict: (conflict) => set({ syncConflict: conflict }),
   closeSyncConflict: () => set({ syncConflict: null }),
+  setFileClipboard: (clip) => set({ fileClipboard: clip }),
+  setSelectedTreePath: (path) => set({ selectedTreePath: path }),
 }))
