@@ -116,3 +116,8 @@ Sidecar 是后台进程、没有前台窗口权限，原实现 `ofn.hwndOwner = 
 e2e 的 8 项失败都落在与 0.5.5 改动无关的时序敏感断言上：同步设置表单切换 4 条、MCP 工具握手 1 条、全局截图出口 1 条，以及本版新写的 2 条 HTML 导出断言（把「HTML 格式也产出 .html」误判为错误、并把已被前面用例改写的笔记正文写死）。后者已修正，前者改为显式等待 / 轮询。
 
 另外，本机在冷编译负载下（`vite build` 4m50s、`cargo build --release` 19m）重复跑 e2e 会在**不同位置**出现 1–13 条抖动失败，属于固定 `waitForTimeout` 与环境不匹配，不是确定性回归。为此本版把 smoke / e2e 的冷启动、面板切换、标签恢复、MCP 握手、图床状态、导出目录都改成了显式等待 / 轮询 / 启动前归一，并补 `data-tree-node` 钩子做确定性定位。CI 的 5 平台构建与商店候选指纹取 Release 产物，不受本地 e2e 抖动影响。
+
+> 本机 `cargo test --bin backend` 在重编 debug 依赖时被系统打断
+> （`libsha1-*.rmeta` 写入「拒绝访问」、`rustc` 报 `STATUS_ACCESS_VIOLATION`），
+> 属于环境 / 文件锁问题，与源码无关；同一份源码的 release 构建成功，
+> 且直接运行此前编出的测试二进制为 5 / 0。CI 会在干净 runner 上重新编译全部目标。
