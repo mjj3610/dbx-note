@@ -41,7 +41,9 @@ page.on('console', (message) => {
 page.on('pageerror', (error) => errors.push(error.message))
 
 await page.goto(`http://127.0.0.1:${PORT}/`, { waitUntil: 'networkidle' })
-await page.waitForTimeout(1200)
+// 启动链路要读设置、探活 Sidecar、扫工作区并恢复标签，冷启动可能要几秒；
+// 显式等外壳出现，别用固定 1.2s 猜（bundle 变大后在慢机器上会误报）
+await page.locator('header').first().waitFor({ state: 'visible', timeout: 30_000 })
 
 check('应用外壳已渲染', await page.locator('header').first().isVisible())
 check('左侧栏页签存在', (await page.getByRole('button', { name: '文件' }).count()) > 0)

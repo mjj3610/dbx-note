@@ -1244,7 +1244,8 @@ check('提交信息模板已保存', (await templateInput.inputValue()) === 'not
 
 // 对象存储 / WebDAV / 自托管：配置表单真的能填能存
 await page.getByRole('dialog').getByRole('button', { name: '对象存储（S3）' }).click()
-await page.waitForTimeout(1400)
+// 同步页签切换要读一次配置并重建表单，显式等控件出现，避免慢机器上固定等待误报
+await page.getByLabel('存储桶').first().waitFor({ state: 'visible', timeout: 15_000 })
 check('对象存储显示配置表单', (await page.getByLabel('存储桶').count()) === 1)
 check('对象存储列出预设服务商', (await page.getByLabel('服务商').count()) === 1)
 await page.getByLabel('存储桶').fill('e2e-bucket')
@@ -1272,10 +1273,10 @@ await page.screenshot({ path: join(SHOTS, '47-sync-options-store.png') })
 await page.screenshot({ path: join(SHOTS, '16-sync-store.png') })
 
 await page.getByRole('dialog').getByRole('button', { name: 'WebDAV', exact: true }).click()
-await page.waitForTimeout(1400)
+await page.getByLabel('WebDAV 目录地址').first().waitFor({ state: 'visible', timeout: 15_000 })
 check('WebDAV 显示目录地址表单', (await page.getByLabel('WebDAV 目录地址').count()) === 1)
 await page.getByRole('dialog').getByRole('button', { name: '自托管', exact: true }).click()
-await page.waitForTimeout(1400)
+await page.getByLabel('服务地址').first().waitFor({ state: 'visible', timeout: 15_000 })
 check('自托管显示服务地址表单', (await page.getByLabel('服务地址').count()) === 1)
 check('自托管提供立即上传入口', (await page.getByRole('button', { name: '立即上传' }).count()) === 1)
 
@@ -1918,6 +1919,9 @@ check(
 
 // 导出：4 种格式齐全；文件必须**真的落盘**，且 toast 回显保存位置
 const EXPORT_DIR = join(ROOT, '.tmp', 'e2e-exports')
+// 每次从空目录开始：下面用「新出现的文件名」判定格式是否串了，旧产物会让断言失效
+rmSync(EXPORT_DIR, { recursive: true, force: true })
+mkdirSync(EXPORT_DIR, { recursive: true })
 await page.locator('[data-footer-export]').click()
 await page.waitForTimeout(300)
 check('导出菜单含 4 种格式', (await page.locator('[data-export-format]').count()) === 4)
@@ -2189,7 +2193,8 @@ await page.getByLabel('启动命令').fill(process.execPath)
 await page.getByLabel('启动参数').fill(join(ROOT, 'scripts', 'mock-mcp.mjs'))
 await page.waitForTimeout(300)
 await page.getByRole('button', { name: '检测工具' }).click()
-await page.waitForTimeout(4000)
+// MCP 服务是 Sidecar 现场起的子进程，握手 + 列工具可能超过固定 4 秒；显式等结果
+await page.locator('text=echo').first().waitFor({ state: 'visible', timeout: 20_000 }).catch(() => {})
 check('检测到 MCP 工具', (await page.locator('text=echo').count()) > 0)
 await page.screenshot({ path: join(SHOTS, '21-tools.png') })
 await page.locator('button', { hasText: 'echo' }).last().click()
