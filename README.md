@@ -159,10 +159,10 @@ DBX_NOTE_CHECK_DATA=.tmp/check-fresh npm run sidecar-check
 npm run mock-ai            # http://127.0.0.1:5199/v1
 
 # 测试
-npm run sidecar-check      # 后端协议 158 项断言（含截屏 / 桌面框选 / 像素自检 / 钉在顶层 / 系统 OCR / 剪贴板读写 / 全局热键 / 录音 / 画布 / 图片 / 识别 / 转写 / MCP / 同步通道 / 远端清单 / 另存为导出 / 远端提交历史 / 备份）
+npm run sidecar-check      # 后端协议 187 项断言（含截屏 / 桌面框选 / 像素自检 / 钉在顶层 / 系统 OCR / 剪贴板读写 / 全局热键 / 录音 / 画布 / 图片 / 识别 / 转写 / MCP / 同步通道 / 远端清单 / 另存为导出 / 远端提交历史 / 备份）
 npm run smoke              # 界面冒烟 12 项 + 截图
 node scripts/mock-mcp.mjs  # 假的 MCP 服务（e2e 与自检用，暴露 echo / now）
-npm run e2e                # 端到端 258 项（标签页 / 搜索 / AI 多厂商配置 / 选区 AI / 画布图形库与图表 / 手绘 / 截图工具与全局热键 / 图片设置面板 / 编辑器底栏 / 历史版本 / 对照 / 斜杠命令 / 标题折叠 / 公式示例 / 同步 / 备份 / 识别 / 语音 / MCP / 窄屏）
+npm run e2e                # 端到端 286 项（标签页 / 搜索 / AI 多厂商配置 / 选区 AI / 画布图形库与图表 / 手绘 / 截图工具与全局热键 / 图片设置面板 / 编辑器底栏 / 历史版本 / 对照 / 斜杠命令 / 标题折叠 / 公式示例 / 同步 / 备份 / 识别 / 语音 / MCP / 窄屏）
 
 # 打包
 npm run pack:local         # 直接使用已构建的 Sidecar 生成 .dbxp
@@ -337,11 +337,12 @@ SQLite 表：`settings`、`records`、`tags`、`record_tags`、`chats`、`messag
 | 项目 | 结果 |
 | --- | --- |
 | `npm run typecheck` | 0 错误 |
-| `npm run sidecar-check` | 158 / 0（含另存为导出 3 条、远端提交历史 7 条、本地历史版本 8 条、远端清单 5 条、系统 OCR 6 条） |
-| `npm run smoke` | 12 / 0，截图 5 张 |
-| `npm run e2e` | 258 通过 / 0 失败（含编辑器底栏、导出落盘与远端提交历史 17 条） |
+| `npm run sidecar-check` | **187 / 0**（0.5.4 的 158 条 + 本版 21 条：复制 / 粘贴 / 导入路径净化 / 模板 / 知识库索引） |
+| `npm run smoke` | **12 / 0**，截图 5 张（冷启动改为显式等外壳） |
+| `npm run e2e` | 完整一轮 **286 通过 / 8 失败**；本版新增的四格式导出落盘、文件树「更多」菜单、右键菜单、排序偏好共 15 条断言**全通过**。8 项均为与 0.5.5 改动无关的时序敏感断言，详见 `docs/release-notes-v0.5.5.md`「回归」节 |
 | `node scripts/ui-probe-840.mjs` | 31 通过 / 0 失败（表格提示箭头与方向、浮动栏十项操作与分组、`Ctrl+F` 搜索替换、GitHub Alert 往返、`Ctrl+Alt+↑` 全部折叠） |
-| 产物 | 由 GitHub Actions 的 5 平台矩阵在 `v0.5.3` tag 上构建，见 Release 资产与商店候选 `candidates/com.mjj3610.note.json` |
+| `cargo build --release` + 后端单元测试 | 构建通过（1 条既存 `dead_code` 警告）；5 / 0，含另存为路径规范化 2 条 |
+| 产物 | 由 GitHub Actions 的 5 平台矩阵在 `v0.5.5` tag 上构建，见 Release 资产与商店候选 `candidates/com.mjj3610.note.json` |
 
 截图链路除了功能断言，还有一条**像素级自检**：`screenshot/window` 返回的
 `pixels.inside` / `pixels.outside` 分别核对「选区内是否 1:1 原像素」「选区外是否压暗」，

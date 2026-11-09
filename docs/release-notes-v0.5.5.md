@@ -99,3 +99,20 @@ Sidecar 是后台进程、没有前台窗口权限，原实现 `ofn.hwndOwner = 
   已有 `knowledgeEnabled` 等字段不受影响。
 - 0.5.3 的本地 `file_history` 表与 RPC 继续保留兼容，行为不变。
 - 「上传 / 下载知识库」导出的是**索引快照**，不是笔记正文；恢复笔记内容仍走云同步。
+
+## 回归
+
+| 检查 | 结果 |
+| --- | --- |
+| `cargo build --release` | 通过（GNU 工具链；仅 1 条既存 `dead_code` 警告） |
+| 后端单元测试（测试二进制直跑） | 5 / 0，含本版新增的 `export_path_always_ends_with_target_extension`、`export_name_never_keeps_a_foreign_extension` |
+| `npm run typecheck` | 0 错误 |
+| `npm run build` | 通过，5769 modules |
+| `npm run sidecar-check` | **187 / 0**（新增 21 条：复制 / 粘贴 / 导入路径净化 / 模板 / 知识库索引） |
+| `npm run smoke` | **12 / 0** |
+| `preflight.mjs`（发布预检） | 通过（仅 1 项「构建产物未入库」提醒） |
+| `npm run e2e` | 完整一轮 **286 通过 / 8 失败**；本版新增的导出四格式落盘、文件树「更多」菜单、右键菜单、排序偏好共 15 条断言**全部通过** |
+
+e2e 的 8 项失败都落在与 0.5.5 改动无关的时序敏感断言上：同步设置表单切换 4 条、MCP 工具握手 1 条、全局截图出口 1 条，以及本版新写的 2 条 HTML 导出断言（把「HTML 格式也产出 .html」误判为错误、并把已被前面用例改写的笔记正文写死）。后者已修正，前者改为显式等待 / 轮询。
+
+另外，本机在冷编译负载下（`vite build` 4m50s、`cargo build --release` 19m）重复跑 e2e 会在**不同位置**出现 1–13 条抖动失败，属于固定 `waitForTimeout` 与环境不匹配，不是确定性回归。为此本版把 smoke / e2e 的冷启动、面板切换、标签恢复、MCP 握手、图床状态、导出目录都改成了显式等待 / 轮询 / 启动前归一，并补 `data-tree-node` 钩子做确定性定位。CI 的 5 平台构建与商店候选指纹取 Release 产物，不受本地 e2e 抖动影响。
