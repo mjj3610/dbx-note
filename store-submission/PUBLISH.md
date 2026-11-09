@@ -4,26 +4,30 @@
 
 | 项 | 值 |
 | --- | --- |
-| 插件 | `com.mjj3610.note` v0.5.0（`publisher: mjj3610`） |
-| 候选 PR | https://github.com/t8y2/dbx-store/pull/469 （1 文件，+59 行，分支 `add-com.mjj3610.note-0.5.0`） |
+| 已上架版本 | `com.mjj3610.note` **v0.5.0**（#469 已于 2026-11-05 签名并合并） |
+| 版本更新 PR | https://github.com/t8y2/dbx-store/pull/484 （0.5.0 → **0.5.2**，1 文件 +59 行，分支 `add-com.mjj3610.note-0.5.2`，open） |
 | 候选包 | 5 个平台，见下表 |
-| 源码 | https://github.com/mjj3610/dbx-note/tree/v0.5.0 |
-| Release | https://github.com/mjj3610/dbx-note/releases/tag/v0.5.0 （CI run 42033509334，一次通过） |
-| CI 状态 | `Validate catalog` 失败，**但这是预期的**：唯一错误是 `open candidate(s) awaiting DBX Store signing` |
-| 待办 | 等维护者审核并评论 `/sign` 完成签名，CI 转绿后由维护者合并 |
+| 源码 | https://github.com/mjj3610/dbx-note/tree/v0.5.2 |
+| Release | https://github.com/mjj3610/dbx-note/releases/tag/v0.5.2 （CI run 42553966663，一次通过） |
+| PR 校验 | `validate` 失败，**但这是预期的**：日志里唯一错误是 `Catalog contains 1 open candidate(s) awaiting DBX Store signing: com.mjj3610.note@0.5.2` |
+| 待办 | 等维护者审核并评论 `/sign`；签名后 `validate` 转绿，由维护者合并 |
 
-候选包指纹（全部来自 CI 产物，未签名）：
+候选包指纹（全部来自 CI 的 `release-candidates.json`，未签名）：
 
 | target | sha256 | size |
 | --- | --- | --- |
-| `windows-x64` | `acafb488fdfc2526df9c369286a7f4b48d485551baa655f2e642c37708742b8a` | 3,732,593 |
-| `darwin-arm64` | `1f51f6c98eda9b5e73d2cf6373b7b7e9a0353ed656a4a65ad547bb659049cb8a` | 3,541,320 |
-| `darwin-x64` | `599d3c2347daebf372d3584707a47bc6be879c17dc6221147b8614de3c014496` | 3,676,895 |
-| `linux-arm64` | `cbf2e55f1c6d5375912b70ea9fed47c74d2763e569ad0939df2329e243f44335` | 3,612,345 |
-| `linux-x64` | `adc194a40a5e93988a20df40982b9eea9ad3910286e2a784e48cacc3bf6f20f2` | 3,677,408 |
+| `windows-x64` | `0e6311e96907c4f4209e0167b16082da98c5f140136dbc1f4c6030778cf3d759` | 3,765,956 |
+| `darwin-arm64` | `37b892ed43e8dcefaca4a1e698102879594cce9cc4ac5d32546820f2ce7629cc` | 3,567,991 |
+| `darwin-x64` | `6aa1837c24438b37db895c6cd8e93a58c0bc54adfc475895b09518e9a77a5dc9` | 3,707,979 |
+| `linux-arm64` | `4c525e9aad444a60b761ed567e46a8ab6dbee60c1228feea08423079554190b8` | 3,642,258 |
+| `linux-x64` | `4e9547acaea48bb880b4758ab74a369b17caefc78c4aea6cbb46bc2df9f7ad4d` | 3,707,948 |
 
 签名后维护者会把 `plugins/com.mjj3610.note.json`、`catalog/index.json` 写回 PR 并删掉
 `candidates/*.json`。作者侧不需要、也不应该自己填 `signingKeyId` 或改 `verified`。
+
+按 `CONTRIBUTING.md`，**已有插件的版本更新**也只提交 `candidates/<id>.json` 一个文件：
+省略的展示字段保留现值，写入的字段替换现值；`plugins/<id>.json` 里的 `latestVersion`
+与 `versions[]` 由签名工作流维护，作者不要手改。
 
 ### #459（0.4.0）的时序问题
 
@@ -39,13 +43,18 @@
 **教训**：关闭旧候选 PR 前先看它有没有评论 / 签名 bot 回复。签名是自动的，可能在自己
 埋头打 Release 的这段时间就完成了。
 
-### 0.5.2 发版准备：代码已就绪，等待打 tag
+**后续（2026-11-05 16:23）**：维护者没有要求重开 #459，而是在 #469 上评论 `/sign`，
+签名工作流完成 5 平台包校验后 PR #469 已合并，`plugins/com.mjj3610.note.json` 的
+`latestVersion` 为 `0.5.0`。所以 0.4.0 从未上架，也无需再重开 #459。
+**每次发布前都要重新查一次 PR 状态**：本轮就差点按过时记录去「替换 #469」。
+
+### 0.5.2 版本更新：已提交，等待签名
 
 0.5.1 修了 Git 通道「打开笔记不拉取」，0.5.2 又补上了「进入文件树时拉远端目录清单 /
 合并仅云端节点」（`docs/版本部署变更说明-v0.5.2.md`）以及全局截图选区 8 向缩放。
-这两批改动 **都不在** #469 的候选包内 —— #469 的 5 个包是用 v0.5.0 的 tag 构建的。
+这两批改动都不在已上架的 0.5.0 包内，因此按「已有插件的版本更新」重发。
 
-2026-11-09 的准备情况：
+2026-11-09 完成情况：
 
 | 项 | 状态 |
 | --- | --- |
@@ -54,17 +63,15 @@
 | 商店元数据 | `.dbx-store.json` 的 `source` 已指向 `v0.5.2`，`releaseNotes` 补齐 0.5.1 / 0.5.2 |
 | 回归 | `cargo check`、`cargo test resize_tests` 3/3、`tsc`、`vite build`、Sidecar 136/0、smoke 11/0、e2e **241/0** 全绿 |
 | preflight | 通过（仅 `backend/target` 构建产物未纳入 git 的提醒） |
-| `v0.5.2` tag | **未打**，CI 尚未触发 |
-| 候选 JSON | 仍是 v0.5.0 的 5 个包指纹 |
+| `v0.5.2` Release | 已发布（非 draft，才会触发 CI）：https://github.com/mjj3610/dbx-note/releases/tag/v0.5.2 |
+| 5 平台 CI | https://github.com/mjj3610/dbx-note/actions/runs/42553966663 — **success** |
+| 候选 JSON | 已用 CI 的 `release-candidates.json` 生成并本地校验通过 |
+| 商店 PR | https://github.com/t8y2/dbx-store/pull/484 — open，diff 只有 `candidates/com.mjj3610.note.json` |
+| 下一步 | 等维护者 `/sign` |
 
-上架前需要二选一：
-
-1. 打 `v0.5.2` tag 让 CI 出 5 平台包 → 用新的 `release-candidates.json` 生成候选 →
-   替换 #469（关掉重开，或直接更新 fork 分支）；
-2. 先让维护者签 0.5.0（旧同步逻辑）上架，再按普通版本更新提 0.5.2。
-
-按功能完整度，建议走第 1 条。注意候选 JSON 的 `sha256` / `size` 必须取 CI 产物，
-不能用本机 mingw 包重新计算；本机 debug 二进制只用于功能回归。
+注意候选 JSON 的 `sha256` / `size` 必须取 CI 产物，不能用本机 mingw 包重新计算；
+本机 debug 二进制只用于功能回归。发布工作流只认 `release: published` 事件，
+建 draft 或事后编辑 Release 描述都不会触发构建。
 
 ## 关键认知
 
