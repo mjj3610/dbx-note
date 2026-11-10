@@ -147,6 +147,9 @@ await open(next.path)                        // 读盘期间 activePath 一直�
 - `open(path, options?: { force?: boolean })` 增加 `force`，允许乐观接管后强制读盘；
 - `closeTabs()` / `closeOtherTabs()` / `remove()` 统一走 `takeOverTab()`；
 - 读盘失败时保留剩余标签，不再让标签栏消失；
+- `open()` 的短路条件从「只看 `activePath`」改成「`activePath` 命中**且 `tabs` 里确有该标签**」：
+  关闭全部标签与启动时 `restoreTabs()` 之间存在竞态，可能留下「编辑器已加载正文但
+  `tabs` 为空」的状态；旧逻辑会让再点同一文件直接 return，标签永远补不回来。
 - `src/components/EditorPane.tsx`：即使 `!activePath` 也**常驻 `<EditorTabBar />`**；
   `tabs.length > 0` 时显示 `data-editor-switching="1"` 的 Spinner 过渡态，
   只有真正没有标签才显示「选择一篇笔记开始编辑」。

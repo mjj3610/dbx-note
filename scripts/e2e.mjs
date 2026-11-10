@@ -477,8 +477,15 @@ await page.locator('div.group').first().locator('button').first().click()
 await page.waitForTimeout(300)
 check('勾选记录后出现操作条', (await page.locator('text=整理成笔记').count()) > 0)
 await page.getByRole('button', { name: '整理成笔记' }).click()
-await page.waitForTimeout(2500)
-const organized = readdirSync(WORKSPACE).filter((name) => name.startsWith('记录整理'))
+await page.waitForTimeout(1000)
+// 整理结果落盘是异步的：文件先建出来、正文后写进去，固定 2.5s 可能读到半截内容
+const organized = []
+for (let attempt = 0; attempt < 24; attempt += 1) {
+  organized.length = 0
+  organized.push(...readdirSync(WORKSPACE).filter((name) => name.startsWith('记录整理')))
+  if (organized.length > 0 && readFileSync(join(WORKSPACE, organized[0]), 'utf8').includes('笔记摘要')) break
+  await page.waitForTimeout(350)
+}
 check('AI 整理了新笔记', organized.length > 0, organized.join(','))
 if (organized.length > 0) {
   const content = readFileSync(join(WORKSPACE, organized[0]), 'utf8')
@@ -571,11 +578,16 @@ check('取消后文件仍在', existsSync(join(WORKSPACE, '周会纪要.md')))
 
 // 标签记忆：刷新后恢复上次打开的标签
 await page.reload({ waitUntil: 'networkidle' })
-await page.waitForTimeout(1600)
-check(
-  '刷新后恢复上次的标签',
-  (await page.getByRole('tablist', { name: '打开的标签' }).getByRole('tab').count()) >= 1,
-)
+await page.waitForTimeout(800)
+// 刷新恢复标签属于冷启动链路（读设置 → 探活 Sidecar → 扫工作区 → restoreTabs），
+// 固定 1.6s 在慢机器上不够；轮询等标签真正挂载
+let restoredTabs = 0
+for (let attempt = 0; attempt < 32; attempt += 1) {
+  restoredTabs = await page.getByRole('tablist', { name: '打开的标签' }).getByRole('tab').count()
+  if (restoredTabs >= 1) break
+  await page.waitForTimeout(300)
+}
+check('刷新后恢复上次的标签', restoredTabs >= 1, `tabs=${restoredTabs}`)
 
 
 /* ---------- 选区 AI ---------- */
@@ -1411,50 +1423,58 @@ check('提交信息模板已保存', (await templateInput.inputValue()) === 'not
 // 对象存储 / WebDAV / 自托管：配置表单真的能填能存
 // 「服务地址」「Secret Access Key」等标签在别的设置页也有同名项，全部限定在同步面板内
 const syncPanel = page.locator('[data-settings-panel="sync"]')
-// 上一步保存的 toast 可能盖住平台按钮，且切页签要异步重建表单；失败就重试点击
-for (let attempt = 0; attempt < 4; attempt += 1) {
-  await page.getByRole('dialog').getByRole('button', { name: '对象存储（S3）' }).click()
-  if ((await syncPanel.getByLabel('存储桶').count()) > 0) break
-  await page.waitForTimeout(700)
+
+/**
+ * 平台切换要读一次配置并异步重建表单，保存成功的 toast 又常盖住平台按钮。
+ * 统一用 force 点击 + 轮询等目标控件，返回是否就绪；**不抛异常**，
+ * 否则单个 waitFor 超时会中断整轮 e2e，后面的公式冷启动等用例全跑不到。
+ */
+async function selectSyncPlatform(name, label, exact = false) {
+  for (let attempt = 0; attempt < 12; attempt += 1) {
+    try {
+      await page.getByRole('dialog').getByRole('button', { name, exact }).click({ force: true, timeout: 4_000 })
+    } catch {
+      // 控件还没挂载 / 弹窗正在重建，下一轮重试
+    }
+    if ((await syncPanel.getByLabel(label).count()) > 0) return true
+    await page.waitForTimeout(350)
+  }
+  return false
 }
-// 同步页签切换要读一次配置并重建表单，显式等控件出现，避免慢机器上固定等待误报
-await syncPanel.getByLabel('存储桶').first().waitFor({ state: 'visible', timeout: 15_000 })
-check('对象存储显示配置表单', (await syncPanel.getByLabel('存储桶').count()) === 1)
-check('对象存储列出预设服务商', (await syncPanel.getByLabel('服务商').count()) === 1)
-await page.getByLabel('存储桶').fill('e2e-bucket')
-await page.getByLabel('Access Key ID').fill('AKIAE2E')
-await page.getByLabel('Secret Access Key').fill('secret-e2e-value')
-await page.waitForTimeout(200)
-await page
-  .locator('[data-settings-panel="sync"]')
-  .getByRole('button', { name: '保存', exact: true })
-  .click()
-await page.waitForTimeout(1400)
-check('对象存储配置已保存', (await syncPanel.getByLabel('存储桶').inputValue()) === 'e2e-bucket')
-// 保存后 Sidecar 会回读并把明文换成掩码，轮询等它落定，别用固定 1.4s 猜
-let secretPlain = ''
-for (let attempt = 0; attempt < 20; attempt += 1) {
-  secretPlain = await syncPanel.getByLabel('Secret Access Key').inputValue()
-  if (secretPlain === '') break
-  await page.waitForTimeout(300)
+
+const s3Ready = await selectSyncPlatform('对象存储（S3）', '存储桶')
+check('对象存储显示配置表单', s3Ready && (await syncPanel.getByLabel('存储桶').count()) === 1)
+if (s3Ready) {
+  check('对象存储列出预设服务商', (await syncPanel.getByLabel('服务商').count()) === 1)
+  await syncPanel.getByLabel('存储桶').fill('e2e-bucket')
+  await syncPanel.getByLabel('Access Key ID').fill('AKIAE2E')
+  await syncPanel.getByLabel('Secret Access Key').fill('secret-e2e-value')
+  await page.waitForTimeout(200)
+  await syncPanel.getByRole('button', { name: '保存', exact: true }).click()
+  await page.waitForTimeout(1400)
+  check('对象存储配置已保存', (await syncPanel.getByLabel('存储桶').inputValue()) === 'e2e-bucket')
+  // 保存后 Sidecar 会回读并把明文换成掩码，轮询等它落定，别用固定 1.4s 猜
+  let secretPlain = ''
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    secretPlain = await syncPanel.getByLabel('Secret Access Key').inputValue()
+    if (secretPlain === '') break
+    await page.waitForTimeout(300)
+  }
+  check('同步密钥保存后只显示掩码', secretPlain === '', secretPlain)
 }
-check('同步密钥保存后只显示掩码', secretPlain === '', secretPlain)
 check('显示同步状态卡片', (await page.locator('[data-store-status]').count()) === 1)
 // 换平台后同步选项要保留，且值不丢
 check('对象存储平台也显示同步选项', (await page.locator('[data-sync-note-options]').count()) === 1)
-check(
-  '切平台后自动同步间隔不丢',
-  (await page.getByLabel('自动同步笔记').inputValue()) === '10',
-)
+const intervalInput = page.getByLabel('自动同步笔记')
+const intervalValue = (await intervalInput.count()) > 0 ? await intervalInput.inputValue() : ''
+check('切平台后自动同步间隔不丢', intervalValue === '10', intervalValue)
 await page.screenshot({ path: join(SHOTS, '47-sync-options-store.png') })
 await page.screenshot({ path: join(SHOTS, '16-sync-store.png') })
 
-await page.getByRole('dialog').getByRole('button', { name: 'WebDAV', exact: true }).click()
-await syncPanel.getByLabel('WebDAV 目录地址').first().waitFor({ state: 'visible', timeout: 15_000 })
-check('WebDAV 显示目录地址表单', (await syncPanel.getByLabel('WebDAV 目录地址').count()) >= 1)
-await page.getByRole('dialog').getByRole('button', { name: '自托管', exact: true }).click()
-await syncPanel.getByLabel('服务地址').first().waitFor({ state: 'visible', timeout: 15_000 })
-check('自托管显示服务地址表单', (await syncPanel.getByLabel('服务地址').count()) === 1)
+const webdavReady = await selectSyncPlatform('WebDAV', 'WebDAV 目录地址', true)
+check('WebDAV 显示目录地址表单', webdavReady && (await syncPanel.getByLabel('WebDAV 目录地址').count()) >= 1)
+const selfHostedReady = await selectSyncPlatform('自托管', '服务地址', true)
+check('自托管显示服务地址表单', selfHostedReady && (await syncPanel.getByLabel('服务地址').count()) === 1)
 check('自托管提供立即上传入口', (await page.getByRole('button', { name: '立即上传' }).count()) === 1)
 
 // 备份与恢复（独立设置页）
@@ -2301,7 +2321,7 @@ await page.getByRole('dialog').getByRole('button', { name: '知识库', exact: t
 await page.waitForTimeout(500)
 const ragPanel = page.locator('[data-settings-panel="rag"]')
 // 设置页切换是异步提交，先显式等面板出现再数控件，避免固定 waitForTimeout 在慢机器上误报
-await ragPanel.first().waitFor({ state: 'visible', timeout: 15_000 })
+await ragPanel.first().waitFor({ state: 'visible', timeout: 15_000 }).catch(() => {})
 check('知识库设置页渲染 RAG 面板', (await ragPanel.count()) >= 1)
 check('RAG 索引参数四项齐全', (await ragPanel.locator('input[type="number"]').count()) === 4)
 check('RAG 索引操作按钮齐全',
@@ -2446,11 +2466,23 @@ await page.waitForTimeout(500)
 // 关掉所有标签，模拟冷启动 / 同步后重新进入；`公式往返.md` 是启动时直接以
 // 原始 $...$ 与 $$...$$ 落盘的夹具，从未经过本编辑器写入。
 await page.keyboard.press('Control+Shift+W')
-await page.waitForTimeout(700)
-await page.locator('[data-tree-node="公式往返.md"]').first().click()
-for (let attempt = 0; attempt < 24; attempt += 1) {
-  if ((await page.locator('.ProseMirror [data-math="inline"]').count()) > 0) break
-  await page.waitForTimeout(250)
+// 关全部是异步的，且可能与启动时的 restoreTabs 竞态；先等到标签真的清空
+for (let attempt = 0; attempt < 20; attempt += 1) {
+  if ((await page.getByRole('tablist', { name: '打开的标签' }).getByRole('tab').count()) === 0) break
+  await page.waitForTimeout(200)
+}
+const mathNode = page.locator('[data-tree-node="公式往返.md"]').first()
+await mathNode.waitFor({ state: 'visible', timeout: 15_000 }).catch(() => {})
+// 窄屏用例刚切回宽屏，第一次点击可能被布局重排吃掉；每 10 轮补点一次，
+// 并等编辑器真的加载出这篇笔记（而不是只看节点数），避免末尾状态污染造成假阴性
+let mathReady = false
+for (let attempt = 0; attempt < 40 && !mathReady; attempt += 1) {
+  if (attempt % 10 === 0 && (await mathNode.count()) > 0) await mathNode.click().catch(() => {})
+  const mathText = await page.locator('.ProseMirror').innerText().catch(() => '')
+  mathReady =
+    mathText.includes('公式往返') &&
+    (await page.locator('.ProseMirror [data-math="inline"] math').count()) > 0
+  if (!mathReady) await page.waitForTimeout(300)
 }
 check(
   '重新打开同步来的笔记含行内公式',

@@ -253,7 +253,11 @@ export const useNotesStore = create<NotesState>((set, get) => ({
   open: async (path, options) => {
     if (!path) return
     const state = get()
-    if (state.activePath === path && !options?.force) return
+    const hasTab = state.tabs.some((tab) => tab.path === path)
+    // 只看 activePath 会在「关闭全部标签 / 恢复标签」的竞态里留下不一致状态：
+    // 编辑器已经加载了这篇笔记，tabs 却是空的，再点同一文件会被短路、标签永远补不回来。
+    // 因此 activePath 命中但标签缺失时，仍要走完整 open() 把标签补上。
+    if (state.activePath === path && hasTab && !options?.force) return
     // 先落盘上一篇，再切换
     await flushPendingSave()
 
