@@ -28,6 +28,23 @@
 0.5.3 指纹见 `git show 2aac00e:store-submission/PUBLISH.md`，其 PR #486 已关闭未合并；
 0.5.2 指纹见 `git show 0cc03ef:store-submission/PUBLISH.md`。）
 
+### v0.5.7 开发中（尚未发 Release / 未提候选）
+
+- 用户四张截图反馈：数学公式同步上传后丢失且重开不显示；编辑器行内 `/` 带不出块编辑菜单；
+  块前 `+` 移动过去就消失；关闭一个 tab 时其它 tab 先消失再回来。
+- 根因分别是：`mathNodes.tsx` 两个节点漏配 `markdownTokenName` 导致 Markdown 解析时公式
+  token 被静默丢弃并被防抖保存写回覆盖云端；`SlashMenu.tsx` 行首正则过严；
+  `BlockHandle.tsx` hover 区域断裂 + 零延迟隐藏；`notes.closeTabs()` 先置空 `activePath`
+  导致 `EditorPane` 卸载标签栏。详见 `docs/release-notes-v0.5.7.md`。
+- 版本已统一升到 `0.5.7`（manifest / package / Cargo.toml / `PLUGIN_VERSION` /
+  `.dbx-store.json`）。本版**不新增后端 RPC、不改表结构**。
+- 顺带修掉 0.5.6 CI 的 `registry.npmmirror.com` 504 隐患：`package-lock.json` 版本
+  `0.4.0 → 0.5.7`，121 条镜像绝对地址全部换成 `registry.npmjs.org`（490 条 `resolved` 已统一）。
+- **#493（v0.5.6）复核仍为 open / merged=false**，`validate | completed | failure` 仍是
+  「等签名」预期。若后续要发 0.5.7，按商店「同一插件只保留一个 open candidate」规则，
+  需先关闭或取代 #493。
+- 回归结果与发布动作待用户确认后再补；此期间不自动打 tag、不自动提 PR。
+
 ### v0.5.6 发布要点
 
 - 用户三张截图反馈：文件夹与文件右键菜单功能按钮不一致；导出 PDF 时弹出「导出为 `print.html`」；
