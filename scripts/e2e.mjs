@@ -241,8 +241,14 @@ for (let attempt = 0; attempt < 24; attempt += 1) {
 check('切换标签恢复上一篇正文', restoredText.includes('本周完成'))
 await page.screenshot({ path: join(SHOTS, '14-tabs.png') })
 await page.keyboard.press('Control+w')
-await page.waitForTimeout(800)
-check('Ctrl+W 关闭当前标签', (await tabList.getByRole('tab').count()) === 1)
+// 关标签要写盘 + 重渲染，固定 800ms 在慢机器上不够；轮询到标签数稳定为 1
+let tabsAfterClose = 0
+for (let attempt = 0; attempt < 25; attempt += 1) {
+  tabsAfterClose = await tabList.getByRole('tab').count()
+  if (tabsAfterClose === 1) break
+  await page.waitForTimeout(200)
+}
+check('Ctrl+W 关闭当前标签', tabsAfterClose === 1)
 check('关闭后自动接管剩余标签', (await page.locator('.ProseMirror').innerText()).includes('记录'))
 
 // 切换标签不丢改动：当前是「规划」，输入后切到「周会纪要」再切回
@@ -251,11 +257,21 @@ await page.keyboard.press('Control+End')
 await page.keyboard.type('切换标签前的输入。')
 await page.waitForTimeout(300)
 await page.locator('text=周会纪要').first().click()
-await page.waitForTimeout(800)
-check('再次打开文件生成新标签', (await tabList.getByRole('tab').count()) === 2)
+let reopenedTabs = 0
+for (let attempt = 0; attempt < 25; attempt += 1) {
+  reopenedTabs = await tabList.getByRole('tab').count()
+  if (reopenedTabs === 2) break
+  await page.waitForTimeout(200)
+}
+check('再次打开文件生成新标签', reopenedTabs === 2)
 await tabList.locator('[data-tab-path="项目/规划.md"]').click()
-await page.waitForTimeout(800)
-check('切回标签保留未保存前的改动', (await page.locator('.ProseMirror').innerText()).includes('切换标签前的输入'))
+let preservedText = ''
+for (let attempt = 0; attempt < 25; attempt += 1) {
+  preservedText = await page.locator('.ProseMirror').innerText().catch(() => '')
+  if (preservedText.includes('切换标签前的输入')) break
+  await page.waitForTimeout(200)
+}
+check('切回标签保留未保存前的改动', preservedText.includes('切换标签前的输入'))
 
 /* ---------- 图片设置面板（对齐 NoteGen 的 image-bubble-menu） ---------- */
 
@@ -1214,8 +1230,13 @@ await page.getByRole('button', { name: '同步', exact: true }).click()
 await page.waitForTimeout(700)
 // 上一次运行会把平台留在「自托管」，这里先切回 GitHub，保证用例可重复执行
 await page.locator('[data-sync-platform="github"]').click()
-await page.waitForTimeout(1200)
-check('同步面板显示 git 版本', (await page.locator('text=git version').count()) > 0)
+// git --version 由 Sidecar 异步返回，轮询等文案出现，避免固定等待在冷启动时误报
+let gitVersionShown = false
+for (let attempt = 0; attempt < 30 && !gitVersionShown; attempt += 1) {
+  gitVersionShown = (await page.locator('text=git version').count()) > 0
+  if (!gitVersionShown) await page.waitForTimeout(250)
+}
+check('同步面板显示 git 版本', gitVersionShown)
 // 同步选项（自动同步 / 应用数据同步）与平台无关，Git 通道也要能看到
 check('Git 平台显示同步选项', (await page.locator('[data-sync-options]').count()) === 1)
 check('Git 平台有笔记设置区', (await page.locator('[data-sync-note-options]').count()) === 1)
