@@ -162,7 +162,7 @@ npm run mock-ai            # http://127.0.0.1:5199/v1
 npm run sidecar-check      # 后端协议 194 项断言（含截屏 / 桌面框选 / 像素自检 / 钉在顶层 / 系统 OCR / 剪贴板读写 / 全局热键 / 录音 / 画布 / 图片 / 识别 / 转写 / MCP / 同步通道 / 远端清单 / 另存为导出 / 远端提交历史 / 备份）
 npm run smoke              # 界面冒烟 12 项 + 截图
 node scripts/mock-mcp.mjs  # 假的 MCP 服务（e2e 与自检用，暴露 echo / now）
-npm run e2e                # 端到端 286 项（标签页 / 搜索 / AI 多厂商配置 / 选区 AI / 画布图形库与图表 / 手绘 / 截图工具与全局热键 / 图片设置面板 / 编辑器底栏 / 历史版本 / 对照 / 斜杠命令 / 标题折叠 / 公式示例 / 同步 / 备份 / 识别 / 语音 / MCP / 窄屏）
+npm run e2e                # 端到端约 330 项（标签页 / 搜索 / AI 多厂商配置 / 选区 AI / 画布图形库与图表 / 手绘 / 截图工具与全局热键 / 图片设置面板 / 编辑器底栏 / 历史版本 / 对照 / 斜杠命令 / 标题折叠 / 公式往返 / 同步 / 备份 / 识别 / 语音 / MCP / 窄屏）
 
 # 打包
 npm run pack:local         # 直接使用已构建的 Sidecar 生成 .dbxp
@@ -337,12 +337,12 @@ SQLite 表：`settings`、`records`、`tags`、`record_tags`、`chats`、`messag
 | 项目 | 结果 |
 | --- | --- |
 | `npm run typecheck` | 0 错误 |
-| `npm run sidecar-check` | **194 / 0**（0.5.5 的 187 条 + 本版向量库状态 / 索引 / 开关 / 混合检索 / 快照 / 打印预览 / 新窗口打开等断言） |
+| `npm run sidecar-check` | **194 / 0** |
 | `npm run smoke` | **12 / 0**，截图 5 张 |
-| `npm run e2e` | 完整一轮 **320 通过 / 3 失败**；本版新增的「文件夹 / 文件两套右键菜单」「RAG 设置页」「PDF 不再写 print.html」等断言**全通过**。3 项均为同步设置面板既有的时序敏感断言（平台选择 / WebDAV / 自托管表单），与本版改动无关，详见 `docs/release-notes-v0.5.6.md`「回归」节 |
+| `npm run e2e` | 完整一轮 **316 通过 / 11 失败**；**v0.5.7 新增的 12 条断言全通过**（公式 Markdown 往返与冷启动重开、列表项内 `/` 触发、真实鼠标穿过装订线后 `+` 可点、关闭 tab 不闪退）。11 项均为既有的环境 / 时序敏感断言（Git 版本与仓库、同步平台表单、备份、全局热键、历史版本入口、MCP 试运行、AI 消息），与本版改动无关，详见 `docs/release-notes-v0.5.7.md`「回归」节 |
 | `node scripts/ui-probe-840.mjs` | 31 通过 / 0 失败（本版未重跑，历史结果） |
-| `cargo build --release` + 后端单元测试 | 构建通过（1 条既存 `dead_code` 警告）；**14 / 0**，含 RAG 分块 / BM25 / 快照 / 余弦 9 条与红色选区边框 1 条 |
-| 产物 | 由 GitHub Actions 的 5 平台矩阵在 `v0.5.6` tag 上构建，见 Release 资产与商店候选 `candidates/com.mjj3610.note.json` |
+| `cargo build --release` + 后端单元测试 | 构建通过（1 条既存 `dead_code` 警告）；**15 / 0** |
+| 产物 | v0.5.7 尚未发 Release；上一版由 GitHub Actions 的 5 平台矩阵在 `v0.5.6` tag 上构建。本版已把 `package-lock.json` 里 121 条 npmmirror 绝对地址换成 `registry.npmjs.org`，下次 CI 不再受 504 影响 |
 
 截图链路除了功能断言，还有一条**像素级自检**：`screenshot/window` 返回的
 `pixels.inside` / `pixels.outside` 分别核对「选区内是否 1:1 原像素」「选区外是否压暗」，

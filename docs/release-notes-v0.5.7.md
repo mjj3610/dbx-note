@@ -232,4 +232,21 @@ v0.5.6 发布时 CI attempt 1 的 windows-x64 / darwin-x64 / darwin-arm64 三个
 
 ## 8. 发布链路
 
-（待补）
+**本版尚未发布**：用户本轮只要求实现与回归，未授权打 tag / 发 Release / 提候选。
+代码、版本号与文档已准备好，本地提交后等待确认。
+
+发布前只读核对结果：
+
+| 项 | 状态 |
+| --- | --- |
+| 商店 PR #493（v0.5.6） | **仍 open / merged=false**，`validate \| completed \| failure` 为「等签名」预期 |
+| 上游 `plugins/com.mjj3610.note.json` | `latestVersion = 0.5.4`（0.5.4 已签名上架，0.5.6 尚未合并） |
+| `v0.5.7` tag / Release | 不存在 |
+| 发布预检 | `preflight.mjs --dir .` 通过 |
+
+若发布 0.5.7，按商店「同一插件只保留一个 open candidate」规则，需先关闭或取代 #493，
+再走：推源码 → 打 `v0.5.7` tag / 发 Release → 等 5 平台 CI → 下载 `release-candidates.json`
+→ 生成并校验候选 JSON → 提新商店 PR → 核对 `validate` 预期失败 → 更新发布记录 → 等 `/sign`。
+
+> 0.5.6 的 CI attempt 1 曾因 `package-lock.json` 里 npmmirror 绝对地址 504 失败，
+> 本版已全部换成 `registry.npmjs.org`，下一次 5 平台构建应不再需要重跑失败 job。
