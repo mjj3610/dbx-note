@@ -178,3 +178,19 @@ PDF 不写 `print.html`、对话面板知识库引用、导出四格式落盘、
 - 「在新窗口打开」受 DBX 单 iframe 限制，落地为系统默认程序的独立窗口，
   不是插件内的第二个编辑器标签。
 - 快照以 JSON 存整个向量库；笔记很多时文件会比较大，由用户自行决定是否随云同步。
+- `package-lock.json` 中仍有 121 条 `registry.npmmirror.com` 绝对 URL。CI attempt 1 有
+  3 个 runner 因该镜像 504 超时导致 `npm ci` 失败；重跑失败 job 后 5 平台全绿。
+  下个版本建议统一替换为 `registry.npmjs.org`（`integrity` 与下载域名无关，替换安全）。
+
+## 8. 发布链路（v0.5.6）
+
+| 项 | 值 |
+| --- | --- |
+| Release | https://github.com/mjj3610/dbx-note/releases/tag/v0.5.6 （非 draft） |
+| CI run | https://github.com/mjj3610/dbx-note/actions/runs/42753418479 — attempt 2 **success**，5 平台 + publish |
+| Release 资产 | 5 个 `.dbxp` + `release-candidates.json` |
+| 商店候选 PR | https://github.com/t8y2/dbx-store/pull/493 — open，单文件 diff，等维护者 `/sign` |
+| 旧候选 | #490（0.5.5）已关闭未合并，保证同一插件只有一个 open candidate |
+
+候选 JSON 的 `sha256` / `size` 全部取自 CI 生成的 `release-candidates.json`；
+`validate` 唯一错误 `awaiting DBX Store signing` 属签名前预期。

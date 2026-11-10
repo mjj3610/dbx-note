@@ -5,27 +5,57 @@
 | 项 | 值 |
 | --- | --- |
 | 已上架版本 | `com.mjj3610.note` **v0.5.4**（#487 已被维护者签名并合并；上游 `plugins/com.mjj3610.note.json` 的 source 已指向 `tree/v0.5.4`） |
-| 待签名候选 | **v0.5.5** → https://github.com/t8y2/dbx-store/pull/490 （open，分支 `add-com.mjj3610.note-0.5.5`，diff 仅 `candidates/com.mjj3610.note.json` +59 行） |
+| 待签名候选 | **v0.5.6** → https://github.com/t8y2/dbx-store/pull/493 （open，分支 `add-com.mjj3610.note-0.5.6`，diff 仅 `candidates/com.mjj3610.note.json` +59 行） |
 | 候选包 | 5 个平台，见下表 |
-| 源码 | https://github.com/mjj3610/dbx-note/tree/v0.5.5 |
-| Release | https://github.com/mjj3610/dbx-note/releases/tag/v0.5.5 （CI run 42624326811，completed / success，6 个 assets = 5 个 `.dbxp` + `release-candidates.json`） |
-| PR 校验 | #490 的 `validate` 为 failure 属**签名前预期**：唯一错误是 `Catalog contains 1 open candidate(s) awaiting DBX Store signing: com.mjj3610.note@0.5.5`；check-run 里其余都是 localization warning。维护者 `/sign` 后写入 `plugins/` 与 `catalog/` 即会通过 |
-| 旧 PR | #469（0.5.0）、#487（0.5.4）已签名合并；#484（0.5.2）、#486（0.5.3）复核后已关闭未合并。提 #490 前重新查过上游 open PR，**无本插件 open 候选**，无需先关旧 PR |
-| 待办 | 等维护者审核 #490 并评论 `/sign`；签名合并后把本表「已上架版本」改成 0.5.5 |
+| 源码 | https://github.com/mjj3610/dbx-note/tree/v0.5.6 |
+| Release | https://github.com/mjj3610/dbx-note/releases/tag/v0.5.6 （CI run 42753418479，attempt 2 completed / success，6 个 assets = 5 个 `.dbxp` + `release-candidates.json`） |
+| PR 校验 | #493 的 `validate` 为 failure 属**签名前预期**：唯一错误是 `Catalog contains 1 open candidate(s) awaiting DBX Store signing: com.mjj3610.note@0.5.6`；check-run 里其余都是 localization warning。维护者 `/sign` 后写入 `plugins/` 与 `catalog/` 即会通过 |
+| 旧 PR | #469（0.5.0）、#487（0.5.4）已签名合并；#484（0.5.2）、#486（0.5.3）、#490（0.5.5）复核后已关闭未合并。提 #493 前重新查过上游 open PR，**无本插件 open 候选** |
+| 待办 | 等维护者审核 #493 并评论 `/sign`；签名合并后把本表「已上架版本」改成 0.5.6 |
 
 候选包指纹（全部来自 CI 的 `release-candidates.json`，未签名）：
 
 | target | sha256 | size |
 | --- | --- | --- |
-| `windows-x64` | `61cef2007f56d68f26b2e413c291f3e06ff261ff91efc01aaffbcd863a6dcd23` | 3,845,314 |
-| `darwin-arm64` | `39d276847aaf3ec5028e1bb4cd35f1221ee2e9f5b2b5475450883e2bb801d0ff` | 3,642,810 |
-| `darwin-x64` | `fcf04fb1f2d7e4413ab3dd1b4a6732d67193293d8ba4279a299aa320f0e41fe0` | 3,786,992 |
-| `linux-arm64` | `c2eb2b9584723613f19a8c9477620d797ef3a7d4fc9f1e81d81a3cc115adefea` | 3,718,538 |
-| `linux-x64` | `b2758e39f65d933773d34569b3b62394951299ecceb1d31db5fc461c6ac2bbee` | 3,787,040 |
+| `windows-x64` | `7d6e00ef56c657d3c61103661a2690876b58610c33d0036c320a3ca69cae7871` | 3,904,043 |
+| `darwin-arm64` | `50e12a005c6eb6bd1e4d76b1a6c65916c24f54e2b7eb4de92f783ce854e734b0` | 3,696,470 |
+| `darwin-x64` | `377d4397be3340b9b85c72e7c01fd931bfabd892518407e921ecd85e621b9d4e` | 3,846,224 |
+| `linux-arm64` | `754cb1f02996ef2f7d6ee360863f336291d4582a59dc329fc52cfc6c714876df` | 3,773,117 |
+| `linux-x64` | `e0c1fb73b7385987b64f789b1b2ae76709864d0c3ab78f97fc68bc9113ee7dc3` | 3,845,021 |
 
-（上一版 0.5.4 的指纹见 `git show 6b99320:store-submission/PUBLISH.md`，其 PR #487 已签名合并；
+（上一版 0.5.5 的指纹见 `git show 767fbe5:store-submission/PUBLISH.md`，其 PR #490 已关闭未合并；
+0.5.4 的指纹见 `git show 6b99320:store-submission/PUBLISH.md`，其 PR #487 已签名合并；
 0.5.3 指纹见 `git show 2aac00e:store-submission/PUBLISH.md`，其 PR #486 已关闭未合并；
 0.5.2 指纹见 `git show 0cc03ef:store-submission/PUBLISH.md`。）
+
+### v0.5.6 发布要点
+
+- 用户三张截图反馈：文件夹与文件右键菜单功能按钮不一致；导出 PDF 时弹出「导出为 `print.html`」；
+  知识库需要与参考项目完整对齐。追加要求「全局截图的区域选择边框线颜色改为红色」。
+- 知识库从 `.dbx-note/kb-index.json` 索引快照换成真 RAG：`backend/src/knowledge.rs` 建
+  `knowledge_sources` / `vector_documents` / `kb_meta` 三表，标题感知 Markdown 分块（代码块 /
+  表格 atomic）、批量 embedding、余弦 + BM25 + RRF 混合检索、快照导入导出；未配置 embedding
+  时降级为纯词法索引而不是报错。前端新增 `RagSection.tsx` 设置页、底栏知识库状态按钮、
+  `chat.ts` 的 `kbSearch()` 上下文注入；AI 模型设置放开 embedding 用途。
+- 右键菜单按 `node.isFolder` 拆成两套（`data-tree-kind="folder|file"`）：文件夹独有新建 /
+  展开折叠 / 创建副本 / 上传下载文件夹 / 批量向量；文件独有在新窗口打开 / 只读打开 /
+  导出四格式 / 上传文件 / 单文件向量开关。新增 `fs/openExternal`、`useUiStore.readOnlyPaths`。
+- PDF 不再静默写 `*.print.html`：新增 `dialog/printHtml`，Sidecar 写临时打印预览页并用系统
+  默认浏览器唤起打印窗口，失败时 UI 明确提示改用「导出 HTML」。
+- 全局截图选区边框与 8 个 resize 手柄描边改为红色 `cref(0xef_4444)`，工具栏与尺寸角标保持中性色。
+- 回归：`cargo check` / `cargo test --bin backend` **14/0** / release Sidecar build / `tsc --noEmit` /
+  `vite build` / **sidecar-check 194/0** / **smoke 12/0** / **e2e 320/3**（3 项为同步设置面板
+  既有时序抖动，本版新增断言全通过），`dbx-store-publish` preflight 通过。详见
+  `docs/release-notes-v0.5.6.md`。
+- 发布链路：`.tmp/close-490.mjs` 先关闭 0.5.5 未签名候选 → `.tmp/api-push.mjs` 用 Git Data API
+  把领先提交推到远端 main（`1e5c659`，树与本地 HEAD 一致）→ `.tmp/release-api-056.mjs`
+  建 tag / 非 draft Release → CI run `42753418479` → **attempt 1 有 3 个平台因
+  `registry.npmmirror.com` 504 超时失败**（linux 两个平台成功），用 `rerun-failed-jobs` 重跑后
+  5 平台全绿 → `.tmp/fetch-candidates-056.mjs` 取指纹 → 现拉上游 tarball 到
+  `.tmp/dbx-store-056` → `make-store-candidate.mjs --validate` 唯一错误为预期的等签名 →
+  `.tmp/store-pr-056.mjs` 提 #493。
+- **待改进**：`package-lock.json` 里仍有 121 条 `registry.npmmirror.com` 绝对 URL，CI 偶发 504。
+  下个版本可统一替换成 `registry.npmjs.org`（integrity 与内容哈希无关，替换安全）。
 
 ### v0.5.5 发布要点
 
