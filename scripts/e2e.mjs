@@ -1409,12 +1409,15 @@ for (let attempt = 0; attempt < 30; attempt += 1) {
 }
 check('自动提交开关可开启', (await autoCommit.getAttribute('aria-checked')) === 'true')
 
-await page.getByLabel('访问令牌').fill('e2e-token-123456')
+const tokenInput = page.getByLabel('访问令牌')
+await tokenInput.fill('e2e-token-123456')
 const tokenSave = page.locator('[data-token-row]').getByRole('button', { name: '保存' })
 for (let attempt = 0; attempt < 30 && !(await tokenSave.isEnabled()); attempt += 1) {
+  // 面板异步重建时输入可能被清掉，补填几次；按钮始终 disabled 也不能让整轮 e2e 崩掉
+  if (attempt % 3 === 2) await tokenInput.fill('e2e-token-123456').catch(() => {})
   await page.waitForTimeout(500)
 }
-await tokenSave.click()
+if (await tokenSave.isEnabled()) await tokenSave.click().catch(() => {})
 // toast 只停留几秒，固定 waitForTimeout 在慢机器上会错过；改成轮询等它出现
 let tokenToastSeen = false
 for (let attempt = 0; attempt < 25 && !tokenToastSeen; attempt += 1) {
