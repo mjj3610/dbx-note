@@ -564,6 +564,16 @@ await page.keyboard.press('Escape')
 await page.waitForTimeout(400)
 await page.keyboard.press('Escape')
 await page.waitForTimeout(400)
+// Radix 的遮罩在焦点丢失时可能不吃 Escape；显式兜底到遮罩真的消失，
+// 否则后面的右键点击会被 overlay 拦截并等满 30s 超时
+for (let attempt = 0; attempt < 5; attempt += 1) {
+  const overlay = page.locator('div[data-state="open"][data-aria-hidden="true"].fixed.inset-0')
+  if ((await overlay.count()) === 0) break
+  const cancel = page.getByRole('dialog').getByRole('button', { name: /取消|关闭/ }).first()
+  if ((await cancel.count()) > 0) await cancel.click({ force: true }).catch(() => {})
+  else await overlay.first().click({ force: true }).catch(() => {})
+  await page.waitForTimeout(350)
+}
 
 // 删除确认
 await page.locator('text=周会纪要').first().click({ button: 'right' })
