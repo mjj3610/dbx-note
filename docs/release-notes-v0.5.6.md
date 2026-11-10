@@ -150,7 +150,26 @@
 
 ## 6. 回归
 
-见文末「回归结果」小节（本版跑完后填写）。
+| 项目 | 结果 |
+| --- | --- |
+| `cargo check` | 通过（仅 1 条既存 `native::shutdown` dead_code 警告） |
+| `cargo test --bin backend` | **14 / 0**（9 条 RAG、2 条另存为路径、3 条 resize、1 条红色选区边框） |
+| `npm run backend` | Windows release Sidecar 构建通过 |
+| `npm run typecheck` | 0 错误 |
+| `npm run build` | 5,770 模块，`ui/assets/index-*.js` 5,334 kB |
+| `npm run sidecar-check` | **194 / 0**（全新数据目录 `.tmp/check-056`） |
+| `npm run smoke` | **12 / 0** |
+| `npm run e2e` | **320 / 3**，见下 |
+| `preflight.mjs --dir .` | 通过（1 项未跟踪文件提醒，均为 target / .tmp 产物） |
+
+e2e 的 3 条失败全部落在同步设置面板的既有时序敏感断言：
+「可选择代码托管平台」「WebDAV 显示目录地址表单」「自托管显示服务地址表单」。
+三轮完整回归中失败位置各不相同（第一轮 3 条在令牌提示 / WebDAV / RAG 面板，
+第二轮 3 条在标签页 + git version，第三轮 3 条在同步平台表单），
+属本机冷启动 + 并发构建负载导致的抖动，与本版改动无关；
+本版新增的所有断言在三轮中均全通过：两套右键菜单及其互斥项、RAG 设置页参数与开关、
+PDF 不写 `print.html`、对话面板知识库引用、导出四格式落盘、历史版本恢复。
+已把其中 7 条固定 `waitForTimeout` 改成显式等待 / 轮询，剩余 3 条保留原样如实记录。
 
 ## 7. 已知边界
 

@@ -337,12 +337,12 @@ SQLite 表：`settings`、`records`、`tags`、`record_tags`、`chats`、`messag
 | 项目 | 结果 |
 | --- | --- |
 | `npm run typecheck` | 0 错误 |
-| `npm run sidecar-check` | **187 / 0**（0.5.4 的 158 条 + 本版 21 条：复制 / 粘贴 / 导入路径净化 / 模板 / 知识库索引） |
-| `npm run smoke` | **12 / 0**，截图 5 张（冷启动改为显式等外壳） |
-| `npm run e2e` | 完整一轮 **286 通过 / 8 失败**；本版新增的四格式导出落盘、文件树「更多」菜单、右键菜单、排序偏好共 15 条断言**全通过**。8 项均为与 0.5.5 改动无关的时序敏感断言，详见 `docs/release-notes-v0.5.5.md`「回归」节 |
-| `node scripts/ui-probe-840.mjs` | 31 通过 / 0 失败（表格提示箭头与方向、浮动栏十项操作与分组、`Ctrl+F` 搜索替换、GitHub Alert 往返、`Ctrl+Alt+↑` 全部折叠） |
-| `cargo build --release` + 后端单元测试 | 构建通过（1 条既存 `dead_code` 警告）；5 / 0，含另存为路径规范化 2 条 |
-| 产物 | 由 GitHub Actions 的 5 平台矩阵在 `v0.5.5` tag 上构建，见 Release 资产与商店候选 `candidates/com.mjj3610.note.json` |
+| `npm run sidecar-check` | **194 / 0**（0.5.5 的 187 条 + 本版向量库状态 / 索引 / 开关 / 混合检索 / 快照 / 打印预览 / 新窗口打开等断言） |
+| `npm run smoke` | **12 / 0**，截图 5 张 |
+| `npm run e2e` | 完整一轮 **320 通过 / 3 失败**；本版新增的「文件夹 / 文件两套右键菜单」「RAG 设置页」「PDF 不再写 print.html」等断言**全通过**。3 项均为同步设置面板既有的时序敏感断言（平台选择 / WebDAV / 自托管表单），与本版改动无关，详见 `docs/release-notes-v0.5.6.md`「回归」节 |
+| `node scripts/ui-probe-840.mjs` | 31 通过 / 0 失败（本版未重跑，历史结果） |
+| `cargo build --release` + 后端单元测试 | 构建通过（1 条既存 `dead_code` 警告）；**14 / 0**，含 RAG 分块 / BM25 / 快照 / 余弦 9 条与红色选区边框 1 条 |
+| 产物 | 由 GitHub Actions 的 5 平台矩阵在 `v0.5.6` tag 上构建，见 Release 资产与商店候选 `candidates/com.mjj3610.note.json` |
 
 截图链路除了功能断言，还有一条**像素级自检**：`screenshot/window` 返回的
 `pixels.inside` / `pixels.outside` 分别核对「选区内是否 1:1 原像素」「选区外是否压暗」，
