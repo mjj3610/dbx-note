@@ -157,8 +157,8 @@ function ExportMenu({ source }: { source: NoteSource }) {
 /**
  * 底栏「知识库」状态按钮（对齐参考项目 footer-bar/vector-calc.tsx）
  *
- * 点击 = 全量重新计算向量；hover 提示最后一次计算时间；计算中图标旋转且按钮禁用。
- * 未配置 embedding 模型时不做无谓请求，只提示去设置页配置。
+ * 点击 = 全量重新计算；hover 提示最后一次计算时间；计算中图标旋转且按钮禁用。
+ * 未配置 embedding 模型时后端会走「仅词法」降级索引，这里不拦截，BM25 检索仍可用。
  */
 function KbStatusButton() {
   const t = useT()
@@ -174,10 +174,7 @@ function KbStatusButton() {
     : t('footer.kb.hint', { time: new Date(status.lastIndexedAt).toLocaleString() })
 
   const runReindex = async () => {
-    if (!status?.configured) {
-      toast.message(t('footer.kb.notConfigured'))
-      return
-    }
+    // 没配 embedding 也让后端重建词法索引，避免按钮点了没反应
     const result = await useKbStore.getState().reindex()
     if (!result) {
       toast.error(t('footer.kb.failed'))

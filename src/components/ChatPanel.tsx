@@ -296,6 +296,7 @@ export function ChatPanel() {
 
             <button
               type="button"
+              data-chat-knowledge
               onClick={() => setWithKnowledge(!withKnowledge)}
               aria-pressed={withKnowledge}
               className={cn(

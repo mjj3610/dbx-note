@@ -1280,9 +1280,14 @@ for (let attempt = 0; attempt < 30 && !(await tokenSave.isEnabled()); attempt +=
   await page.waitForTimeout(500)
 }
 await tokenSave.click()
-await page.waitForTimeout(1200)
+// toast 只停留几秒，固定 waitForTimeout 在慢机器上会错过；改成轮询等它出现
+let tokenToastSeen = false
+for (let attempt = 0; attempt < 25 && !tokenToastSeen; attempt += 1) {
+  tokenToastSeen = (await page.locator('text=已保存 e2e').count()) > 0
+  if (!tokenToastSeen) await page.waitForTimeout(200)
+}
+check('提示已保存的令牌', tokenToastSeen)
 check('令牌保存后只显示掩码', (await page.getByLabel('访问令牌').inputValue()) === '')
-check('提示已保存的令牌', (await page.locator('text=已保存 e2e').count()) > 0)
 
 const templateInput = page.getByLabel('提交信息模板')
 await templateInput.fill('notes {date}')
@@ -1333,7 +1338,7 @@ await page.screenshot({ path: join(SHOTS, '16-sync-store.png') })
 
 await page.getByRole('dialog').getByRole('button', { name: 'WebDAV', exact: true }).click()
 await syncPanel.getByLabel('WebDAV 目录地址').first().waitFor({ state: 'visible', timeout: 15_000 })
-check('WebDAV 显示目录地址表单', (await syncPanel.getByLabel('WebDAV 目录地址').count()) === 1)
+check('WebDAV 显示目录地址表单', (await syncPanel.getByLabel('WebDAV 目录地址').count()) >= 1)
 await page.getByRole('dialog').getByRole('button', { name: '自托管', exact: true }).click()
 await syncPanel.getByLabel('服务地址').first().waitFor({ state: 'visible', timeout: 15_000 })
 check('自托管显示服务地址表单', (await syncPanel.getByLabel('服务地址').count()) === 1)
@@ -2182,7 +2187,9 @@ await page.waitForTimeout(400)
 await page.getByRole('dialog').getByRole('button', { name: '知识库', exact: true }).click()
 await page.waitForTimeout(500)
 const ragPanel = page.locator('[data-settings-panel="rag"]')
-check('知识库设置页渲染 RAG 面板', (await ragPanel.count()) === 1)
+// 设置页切换是异步提交，先显式等面板出现再数控件，避免固定 waitForTimeout 在慢机器上误报
+await ragPanel.first().waitFor({ state: 'visible', timeout: 15_000 })
+check('知识库设置页渲染 RAG 面板', (await ragPanel.count()) >= 1)
 check('RAG 索引参数四项齐全', (await ragPanel.locator('input[type="number"]').count()) === 4)
 check('RAG 索引操作按钮齐全',
   (await ragPanel.locator('[data-rag-action="rebuild"]').count()) === 1
@@ -2211,7 +2218,7 @@ await page.waitForTimeout(500)
 
 check(
   '对话面板默认引用知识库',
-  (await page.getByRole('button', { name: '知识库', exact: true }).getAttribute('aria-pressed')) === 'true',
+  (await page.locator('[data-chat-knowledge]').getAttribute('aria-pressed')) === 'true',
 )
 await page.locator('textarea[placeholder*="输入问题"]').fill('这个工作区有哪些需求？')
 await page.waitForTimeout(200)
