@@ -19,6 +19,7 @@ mod fileops;
 mod githistory;
 mod gitsync;
 mod imagehost;
+mod knowledge;
 mod logs;
 mod mcp;
 // 截图 / 剪贴板位图 / 录音 / 系统 OCR 全部直接调 Win32（GDI、剪贴板、COM、WinRT），
@@ -68,7 +69,7 @@ use serde_json::{json, Value};
 
 /// 插件标识与版本，必须与 manifest.json 保持一致
 const PLUGIN_ID: &str = "com.mjj3610.note";
-pub(crate) const PLUGIN_VERSION: &str = "0.5.5";
+pub(crate) const PLUGIN_VERSION: &str = "0.5.6";
 /// 协议版本
 const PROTOCOL_VERSION: i64 = 1;
 
@@ -320,13 +321,26 @@ fn dispatch(app: &App, method: &str, params: Value) -> RpcResult {
         "fs/copy" => fileops::copy_entry(app, &params),
         "fs/move" => fileops::move_entry(app, &params),
         "fs/reveal" => fileops::reveal_entry(app, &params),
+        "fs/openExternal" => fileops::open_external(app, &params),
         "fs/import" => fileops::import_entries(app, &params),
         "fs/templates" => fileops::list_templates(app),
-        "kb/status" => fileops::kb_status(app),
-        "kb/reindex" => fileops::kb_reindex(app),
-        "kb/upsert" => fileops::kb_upsert(app, &params),
-        "kb/export" => fileops::kb_export(app),
-        "kb/import" => fileops::kb_import(app, &params),
+        // 旧版 kb 系列 RPC 保留兼容（0.5.5 是工作区索引快照，0.5.6 起底层换成向量库）
+        "kb/status" => knowledge::legacy_status(app),
+        "kb/reindex" => knowledge::legacy_reindex(app),
+        "kb/upsert" => knowledge::legacy_upsert(app, &params),
+        "kb/export" => knowledge::legacy_export(app),
+        "kb/import" => knowledge::legacy_import(app, &params),
+        // 0.5.6 知识库：分块 → embedding → 向量库 → 混合检索 → 快照同步
+        "kb/vectorStatus" => knowledge::status(app),
+        "kb/indexFile" => knowledge::index_file_rpc(app, &params),
+        "kb/indexFolder" => knowledge::index_folder_rpc(app, &params),
+        "kb/reindexAll" => knowledge::reindex(app, &params),
+        "kb/deleteVectors" => knowledge::delete_vectors(app, &params),
+        "kb/flags" => knowledge::set_flags(app, &params),
+        "kb/clear" => knowledge::clear_all(app),
+        "kb/search" => knowledge::search(app, &params),
+        "kb/snapshotExport" => knowledge::export_snapshot(app),
+        "kb/snapshotImport" => knowledge::import_snapshot(app, &params),
         "image/read" => files::read_image(app, &params),
         "image/save" => files::save_image(app, &params),
         "image/upload" => imagehost::upload(&params),
@@ -358,6 +372,8 @@ fn dispatch(app: &App, method: &str, params: Value) -> RpcResult {
         "clipboard/write" => native::write_clipboard(&params),
         // 导出：系统「另存为」对话框选路径后由 Sidecar 写盘（宿主 iframe 的 download 不可靠）
         "dialog/saveFile" => native::save_text_file(&params),
+        // PDF 导出：Sidecar 写临时打印预览并交给系统默认浏览器唤起打印窗口
+        "dialog/printHtml" => native::print_html(&params),
         "audio/recordStart" => native::record_start(),
         "audio/recordStop" => native::record_stop(),
         "audio/recordStatus" => native::record_status(),

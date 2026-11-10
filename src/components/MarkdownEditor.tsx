@@ -105,6 +105,7 @@ export function MarkdownEditor({
   value,
   onChange,
   registerBus = true,
+  readOnly = false,
 }: {
   path: string
   /** 受控用法（并排对照面板）：不传则读写笔记状态 */
@@ -115,6 +116,8 @@ export function MarkdownEditor({
    * 并排对照里的辅助编辑器传 false，避免抢走主编辑器的能力。
    */
   registerBus?: boolean
+  /** 右键「只读打开」：正文可复制 / 选中，但不接受任何输入 */
+  readOnly?: boolean
 }) {
   const t = useT()
   const controlled = value !== undefined
@@ -215,6 +218,11 @@ export function MarkdownEditor({
     },
     [path],
   )
+
+  /** 只读模式：Tiptap 的 editable 是运行时属性，切换时同步给编辑器实例 */
+  useEffect(() => {
+    if (editor && editor.isEditable === readOnly) editor.setEditable(!readOnly)
+  }, [editor, readOnly])
 
   /**
    * 远端图片代理渲染

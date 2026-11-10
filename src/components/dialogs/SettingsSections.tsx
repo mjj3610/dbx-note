@@ -5,11 +5,9 @@
  */
 import { useEffect, useState } from 'react'
 import {
-  Book,
   Bot,
   Brain,
   ChartNoAxesColumnIncreasing,
-  Database,
   Drama,
   Globe2,
   Keyboard,
@@ -379,32 +377,7 @@ export function WebSearchSection() {
   )
 }
 
-/* ---------------- 知识库 ---------------- */
-
-export function RagSection() {
-  const t = useT()
-  const knowledgeEnabled = useSettingsStore((state) => state.knowledgeEnabled)
-  const patch = useSettingsStore((state) => state.patch)
-
-  return (
-    <SettingPage title={t('rag.title')} desc={t('rag.desc')}>
-      <SettingSection>
-        <SettingItem icon={Book} title={t('rag.enable.title')} desc={t('rag.enable.desc')}>
-          <Switch
-            aria-label={t('rag.enable.title')}
-            checked={knowledgeEnabled}
-            onCheckedChange={(value) => patch({ knowledgeEnabled: value })}
-          />
-        </SettingItem>
-        <SettingItem icon={Database} title={t('rag.method.title')} desc={t('rag.method.desc')}>
-          <span className="rounded-md bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">
-            {t('rag.method.value')}
-          </span>
-        </SettingItem>
-      </SettingSection>
-    </SettingPage>
-  )
-}
+/* 知识库（RAG）设置页已迁到 ./settings/RagSection.tsx（完整向量库配置） */
 
 /* ---------------- 提示词 ---------------- */
 

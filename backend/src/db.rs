@@ -34,6 +34,8 @@ pub fn open(path: &Path) -> rusqlite::Result<Connection> {
     conn.pragma_update(None, "journal_mode", "WAL")?;
     conn.pragma_update(None, "synchronous", "NORMAL")?;
     init_schema(&conn)?;
+    // 知识库（RAG）表与基础表放在同一个库里，共用连接与事务
+    crate::knowledge::init(&conn)?;
     Ok(conn)
 }
 

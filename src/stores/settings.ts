@@ -377,6 +377,25 @@ export interface FileViewSettings {
   autoUpdateKnowledgeBase: boolean
 }
 
+/**
+ * 知识库（RAG）参数：与参考项目 knowledge-search.ts 的默认配置对齐。
+ * 后端 kb 系列 RPC 会读取这些值作为缺省参数，索引与检索共用同一份配置。
+ */
+export interface RagSettings {
+  /** 单个分块的最大字符数 */
+  chunkSize: number
+  /** 相邻分块的重叠字符数 */
+  chunkOverlap: number
+  /** 混合检索召回条数 */
+  topK: number
+  /** 最低相似度阈值 */
+  threshold: number
+  /** 保存笔记后自动重算本篇向量 */
+  autoVector: boolean
+  /** 对话前自动注入检索到的上下文 */
+  autoInject: boolean
+}
+
 export interface SettingsSnapshot {
   theme: ThemeMode
   locale: Locale
@@ -405,6 +424,7 @@ export interface SettingsSnapshot {
   template: TemplateSettings
   shortcuts: ShortcutSettings
   fileView: FileViewSettings
+  rag: RagSettings
 }
 
 /** 内置技能：覆盖最常见的四类写作需求 */
@@ -730,6 +750,14 @@ const DEFAULT_SETTINGS: SettingsSnapshot = {
     syncStaticAssets: true,
     autoUpdateKnowledgeBase: false,
   },
+  rag: {
+    chunkSize: 1000,
+    chunkOverlap: 200,
+    topK: 5,
+    threshold: 0.25,
+    autoVector: true,
+    autoInject: true,
+  },
 }
 
 interface SettingsState extends SettingsSnapshot {
@@ -741,6 +769,8 @@ interface SettingsState extends SettingsSnapshot {
   patch: (patch: Partial<SettingsSnapshot>) => void
   /** 文件树视图偏好的局部更新（自动持久化） */
   patchFileView: (patch: Partial<FileViewSettings>) => void
+  /** 知识库（RAG）参数的局部更新（自动持久化） */
+  patchRag: (patch: Partial<RagSettings>) => void
   patchAi: (patch: Partial<AiSettings>) => void
   /** 新增或整体替换一个厂商（按 id 判断） */
   upsertProvider: (provider: AiProvider) => void
@@ -825,6 +855,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
           audio: { ...DEFAULT_SETTINGS.audio, ...(stored.audio ?? {}) },
           imageMethod: { ...DEFAULT_SETTINGS.imageMethod, ...(stored.imageMethod ?? {}) },
           fileView: { ...DEFAULT_SETTINGS.fileView, ...(stored.fileView ?? {}) },
+          rag: { ...DEFAULT_SETTINGS.rag, ...(stored.rag ?? {}) },
           template: {
             items:
               Array.isArray(stored.template?.items) && stored.template.items.length > 0
@@ -865,6 +896,11 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
 
   patchFileView: (patch) => {
     set({ fileView: { ...get().fileView, ...patch } })
+    void get().persist()
+  },
+
+  patchRag: (patch) => {
+    set({ rag: { ...get().rag, ...patch } })
     void get().persist()
   },
 
@@ -983,6 +1019,7 @@ async function writeSettings(): Promise<void> {
     template,
     shortcuts,
     fileView,
+    rag,
   } = useSettingsStore.getState()
   try {
     await setSetting(STORAGE_KEY, {
@@ -1009,6 +1046,7 @@ async function writeSettings(): Promise<void> {
       template,
       shortcuts,
       fileView,
+      rag,
     })
   } catch (error) {
     console.warn('[settings] 保存失败', error)

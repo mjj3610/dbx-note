@@ -2040,6 +2040,18 @@ for (const format of ['html', 'json']) {
   }
 }
 
+// 回归用户反馈「导出 PDF 弹出保存 print.html」：0.5.6 起只唤起系统打印预览，绝不写 HTML 文件
+const beforePdf = existsSync(EXPORT_DIR) ? readdirSync(EXPORT_DIR) : []
+await page.locator('[data-footer-export]').click()
+await page.waitForTimeout(250)
+await page.locator('[data-export-format="pdf"]').click()
+await page.waitForTimeout(1200)
+const pdfCreated = existsSync(EXPORT_DIR)
+  ? readdirSync(EXPORT_DIR).filter((name) => !beforePdf.includes(name))
+  : []
+check('PDF 导出不再保存 print.html',
+  !pdfCreated.some((name) => name.includes('print.html')), pdfCreated.join(','))
+
 /* ---------- 文件树「更多」菜单与右键菜单（对齐参考项目） ---------- */
 
 await page.getByRole('button', { name: '文件', exact: true }).first().click()
@@ -2073,17 +2085,37 @@ check('排序偏好写入设置', (fileViewValue?.value?.fileView ?? fileViewVal
 await page.keyboard.press('Escape')
 await page.waitForTimeout(300)
 
-// 右键菜单：新建 / 展开折叠 / 查看目录 / 模板 / 知识库 / 剪贴板 / 重命名 / 删除
+// 文件右键菜单：参考项目 file-item.tsx —— 新窗口 / 只读 / 导出 / 上传文件 + 知识库 + 剪贴板
 await page.locator('[data-tree-node="周会纪要.md"]').click({ button: 'right' })
 await page.waitForTimeout(400)
-check('右键菜单已打开', (await page.locator('[data-tree-menu]').count()) === 1)
+check('文件右键菜单已打开', (await page.locator('[data-tree-menu][data-tree-kind="file"]').count()) === 1)
+for (const action of [
+  'open-new-window', 'open-read-only', 'reveal', 'template', 'export', 'upload-file',
+  'kb', 'cut', 'copy', 'paste', 'rename', 'delete',
+]) {
+  check(`文件右键含 ${action}`, (await page.locator(`[data-tree-action="${action}"]`).count()) === 1)
+}
+for (const action of ['new-file', 'new-folder', 'duplicate', 'upload-folder']) {
+  check(`文件右键不含 ${action}`, (await page.locator(`[data-tree-action="${action}"]`).count()) === 0)
+}
+check('文件右键显示 F2 / Del 快捷键', (await page.locator('[data-tree-menu]').innerText()).includes('F2'))
+await page.keyboard.press('Escape')
+await page.waitForTimeout(300)
+
+// 文件夹右键菜单：参考项目 folder-item/index.tsx —— 新建 / 展开折叠 / 副本 / 上传下载文件夹
+await page.locator('[data-tree-node="项目"]').click({ button: 'right' })
+await page.waitForTimeout(400)
+check('文件夹右键菜单已打开', (await page.locator('[data-tree-menu][data-tree-kind="folder"]').count()) === 1)
 for (const action of [
   'new-file', 'new-folder', 'reveal', 'template', 'kb',
-  'cut', 'copy', 'duplicate', 'paste', 'rename', 'delete',
+  'cut', 'copy', 'duplicate', 'paste', 'upload-folder', 'download-folder',
+  'rename', 'delete',
 ]) {
-  check(`右键菜单含 ${action}`, (await page.locator(`[data-tree-action="${action}"]`).count()) === 1)
+  check(`文件夹右键含 ${action}`, (await page.locator(`[data-tree-action="${action}"]`).count()) === 1)
 }
-check('右键菜单显示 F2 / Del 快捷键', (await page.locator('[data-tree-menu]').innerText()).includes('F2'))
+for (const action of ['open-new-window', 'open-read-only', 'export', 'upload-file']) {
+  check(`文件夹右键不含 ${action}`, (await page.locator(`[data-tree-action="${action}"]`).count()) === 0)
+}
 await page.keyboard.press('Escape')
 await page.waitForTimeout(300)
 
@@ -2149,7 +2181,16 @@ await settingsButton().click()
 await page.waitForTimeout(400)
 await page.getByRole('dialog').getByRole('button', { name: '知识库', exact: true }).click()
 await page.waitForTimeout(500)
-const knowledgeSwitch = page.getByRole('switch', { name: '知识库检索' })
+const ragPanel = page.locator('[data-settings-panel="rag"]')
+check('知识库设置页渲染 RAG 面板', (await ragPanel.count()) === 1)
+check('RAG 索引参数四项齐全', (await ragPanel.locator('input[type="number"]').count()) === 4)
+check('RAG 索引操作按钮齐全',
+  (await ragPanel.locator('[data-rag-action="rebuild"]').count()) === 1
+  && (await ragPanel.locator('[data-rag-action="clear"]').count()) === 1
+  && (await ragPanel.locator('[data-rag-action="diagnose"]').count()) === 1)
+const injectSwitch = ragPanel.getByRole('switch', { name: '对话前自动注入知识库' })
+check('对话前自动注入知识库默认开启', (await injectSwitch.getAttribute('aria-checked')) === 'true')
+const knowledgeSwitch = ragPanel.getByRole('switch', { name: '知识库检索' })
 if ((await knowledgeSwitch.getAttribute('aria-checked')) !== 'true') {
   await knowledgeSwitch.click()
   await page.waitForTimeout(400)

@@ -7,8 +7,8 @@
  * 内容源统一取 `useNotesStore.content`：可视化编辑器 onUpdate 会回写 getMarkdown()，
  * 源码模式也用同一份，所以复制 / 导出拿到的永远是当前最新正文。
  */
-import { useMemo, useState } from 'react'
-import { Copy, Download, ListTree, Type } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { Copy, Database, Download, ListTree, Loader2, Type } from 'lucide-react'
 import { toast } from 'sonner'
 
 import {
@@ -26,6 +26,7 @@ import {
   type NoteSource,
 } from '@/lib/markdownExport'
 import { useT } from '@/lib/useT'
+import { useKbStore } from '@/stores/kb'
 import { useNotesStore } from '@/stores/notes'
 import { useUiStore } from '@/stores/ui'
 import { HistorySheet } from './editor/HistorySheet'
@@ -101,13 +102,16 @@ function ExportMenu({ source }: { source: NoteSource }) {
     try {
       if (format === 'pdf') toast.message(t('footer.exportPdfHint'))
       const outcome = await exportMarkdown(format, source)
+      // 打印窗口起不来时给明确错误，不再悄悄保存成 HTML 文件
+      if (!outcome.saved && outcome.message) {
+        toast.error(outcome.message)
+        return
+      }
       // 用户在另存为里点了取消：不写盘、不给成功反馈（与参考项目一致）
       if (!outcome.saved) return
       const filename = outcome.filename ?? ''
       if (outcome.printed) {
         toast.success(t('footer.exportPdfOpened'))
-      } else if (outcome.fallback && outcome.format === 'pdf') {
-        toast.message(t('footer.exportPdfFallback'))
       } else if (outcome.fallback) {
         toast.success(t('footer.exportSuccessFallback', { filename }))
       } else {
@@ -147,6 +151,53 @@ function ExportMenu({ source }: { source: NoteSource }) {
         ))}
       </DropdownMenuContent>
     </DropdownMenu>
+  )
+}
+
+/**
+ * 底栏「知识库」状态按钮（对齐参考项目 footer-bar/vector-calc.tsx）
+ *
+ * 点击 = 全量重新计算向量；hover 提示最后一次计算时间；计算中图标旋转且按钮禁用。
+ * 未配置 embedding 模型时不做无谓请求，只提示去设置页配置。
+ */
+function KbStatusButton() {
+  const t = useT()
+  const status = useKbStore((state) => state.status)
+  const busy = useKbStore((state) => state.busy)
+
+  useEffect(() => {
+    void useKbStore.getState().refresh()
+  }, [])
+
+  const lastText = !status?.lastIndexedAt
+    ? t('footer.kb.never')
+    : t('footer.kb.hint', { time: new Date(status.lastIndexedAt).toLocaleString() })
+
+  const runReindex = async () => {
+    if (!status?.configured) {
+      toast.message(t('footer.kb.notConfigured'))
+      return
+    }
+    const result = await useKbStore.getState().reindex()
+    if (!result) {
+      toast.error(t('footer.kb.failed'))
+      return
+    }
+    toast.success(t('footer.kb.reindexed', { count: result.indexed, chunks: result.chunks }))
+  }
+
+  return (
+    <button
+      type="button"
+      className={FOOTER_BUTTON_CLASS}
+      data-footer-kb
+      disabled={busy}
+      title={busy ? t('footer.kb.calculating') : lastText}
+      onClick={() => void runReindex()}
+    >
+      {busy ? <Loader2 className="size-3 animate-spin" /> : <Database className="size-3" />}
+      {t('footer.kb')}
+    </button>
   )
 }
 
@@ -199,6 +250,7 @@ export function EditorFooterBar() {
       </span>
 
       <span className="flex-1" />
+      <KbStatusButton />
       <HistorySheet path={activePath} />
     </footer>
   )

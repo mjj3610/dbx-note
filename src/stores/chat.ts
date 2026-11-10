@@ -369,12 +369,45 @@ function parseToolRequest(
 }
 
 /**
- * 知识库检索：用当前提问在工作区做全文搜索，取命中正文的几篇截断后拼成片段块。
+ * 知识库检索：优先走后端的向量 + BM25 混合检索，与参考项目 `knowledge-search.ts` 对齐。
  *
- * 不做向量化——插件运行在 `connect-src 'none'` 的沙箱里，也拿不到 embedding 服务；
- * 全文命中 + 截断已经能支撑「问自己的笔记」这类场景，且完全不产生额外网络请求。
+ * 命中片段由后端拼成带「文件：路径」前缀的上下文，来源列表回写给输入区提示；
+ * 未配置 embedding 模型、索引为空或后端暂不可用时，降级到纯本地全文检索，
+ * 保证「问自己的笔记」在任何配置下都能用。
  */
 async function buildKnowledgeBlock(
+  query: string,
+  zh: boolean,
+  onFiles: (files: string[]) => void,
+): Promise<string> {
+  const rag = useSettingsStore.getState().rag
+  if (rag.autoInject) {
+    try {
+      const result = await rpc.kbSearch({
+        query,
+        topK: rag.topK,
+        threshold: rag.threshold,
+      })
+      // 未配置 embedding 时后端走「仅词法」降级索引，BM25 命中的上下文同样可用
+      if (result.items.length > 0 && result.context.trim()) {
+        onFiles(result.sources)
+        const header = zh
+          ? '【知识库片段（向量 + 关键词混合检索，回答时优先引用并注明出处）】'
+          : '[Knowledge snippets — hybrid vector + BM25 retrieval; prefer citing them]'
+        return `\n\n${header}\n\n${result.context}`
+      }
+    } catch {
+      /* 后端未就绪或尚未配置 embedding：继续走全文检索兜底 */
+    }
+  }
+  return buildLexicalBlock(query, zh, onFiles)
+}
+
+/**
+ * 兜底的纯本地全文检索：取命中正文的几篇截断后拼成片段块。
+ * 不需要 embedding 服务，也不产生额外网络请求。
+ */
+async function buildLexicalBlock(
   query: string,
   zh: boolean,
   onFiles: (files: string[]) => void,

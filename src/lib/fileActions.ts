@@ -284,22 +284,22 @@ export async function downloadRemotePaths(paths: string[]): Promise<number> {
 
 /* ---------------- 知识库索引 ---------------- */
 
-/** 上传知识库：把索引快照另存为 JSON 文件 */
+/** 上传知识库：导出向量库快照到工作区，再另存一份 JSON 便于人工备份 */
 export async function uploadKnowledgeBase(): Promise<rpc.SaveTextResult> {
-  const { json } = await rpc.kbExport()
+  const snapshot = await rpc.kbExportSnapshot()
   return rpc.saveTextFile({
-    defaultName: 'dbx-note-kb-index.json',
+    defaultName: 'dbx-note-rag-snapshot.json',
     extension: 'json',
-    filterName: '知识库索引',
-    content: json,
+    filterName: '知识库快照',
+    content: snapshot.json,
   })
 }
 
-/** 下载知识库：从用户选的 JSON 快照恢复索引 */
+/** 下载知识库：从用户选的 JSON 快照恢复向量库 */
 export async function downloadKnowledgeBase(): Promise<number | null> {
   const [file] = await pickFiles({ multiple: false, accept: '.json,application/json' })
   if (!file) return null
-  const result = await rpc.kbImport(await readText(file))
+  const result = await rpc.kbImportSnapshot({ json: await readText(file) })
   return result.count
 }
 

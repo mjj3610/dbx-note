@@ -7,7 +7,8 @@
  *   宿主 iframe 里的 `<a download>` 可能被沙箱吞掉，不能作为默认落盘方式。
  * - JSON 导出的是 **Tiptap JSON 文档**（`MarkdownManager.parse`），不是 marked 的 token 树。
  * - HTML 导出会把工作区图片内联成 data URL，避免导出文件离开工作区后丢图。
- * - PDF 走系统打印窗口，打印不可用时降级导出 HTML。
+ * - PDF 走**系统打印窗口**：Sidecar 写临时打印预览页并交给系统默认浏览器唤起打印，
+ *   用户选「另存为 PDF」。不再静默降级成 `*.print.html` 另存为文件。
  *
  * 调用示例：
  *   await copyText(await contentForCopy('text', { path: '笔记.md', markdown: '# 标题' }))
@@ -48,6 +49,8 @@ export interface ExportOutcome {
   fallback?: boolean
   /** PDF 打印窗口已唤起 */
   printed?: boolean
+  /** 打印窗口无法唤起时的可读提示（不写盘、不弹另存为） */
+  message?: string
 }
 
 /** 导出文件名里不允许出现的字符（Windows / macOS / Linux 交集） */
@@ -419,19 +422,20 @@ export async function exportMarkdown(format: ExportFormat, source: NoteSource): 
       format,
     )
   }
-  // PDF：唤起系统打印窗口；环境不支持时导出「可打印 HTML」，
-  // 用 .print.html 后缀与普通 HTML 导出区分，避免用户以为点 PDF 却导出了 HTML
+  // PDF：交给 Sidecar 打开系统打印窗口（用户在里面选「另存为 PDF」）。
+  //
+  // 0.5.5 在这里降级保存 `*.print.html`：宿主 iframe 的 window.open / iframe.print()
+  // 常被沙箱静默吞掉，结果「点 PDF 却弹出保存 HTML 的另存为框」，与用户预期完全相反。
+  // 现在改为由 Sidecar 写临时预览页并用系统默认浏览器打开，不受插件沙箱约束；
+  // 连浏览器都打不开时只给明确提示，绝不偷偷写 HTML 文件。
   const printableHtml = await exportHtmlDocument(source)
-  if (await printPdf(printableHtml)) {
+  const result = await rpc.printHtml({ name: `${base}-print-preview.html`, html: printableHtml })
+  if (result.opened) {
     return { format, saved: true, printed: true, filename: `${base}.pdf` }
   }
-  const fallback = await saveTextExport(
-    printableHtml,
-    `${base}.print.html`,
-    'html',
-    'text/html;charset=utf-8',
-    '可打印 HTML 文件',
+  return {
     format,
-  )
-  return { ...fallback, fallback: true }
+    saved: false,
+    message: result.message ?? '无法唤起系统打印窗口，请改用「导出 HTML」后自行打印为 PDF',
+  }
 }

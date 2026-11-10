@@ -40,11 +40,14 @@ export function SourceEditor({
   onChange,
   lineNumbers = true,
   wrap = true,
+  readOnly = false,
 }: {
   value: string
   onChange: (next: string) => void
   lineNumbers?: boolean
   wrap?: boolean
+  /** 右键「只读打开」：源码视图同样禁止编辑 */
+  readOnly?: boolean
 }) {
   const extensions = [
     markdown({ base: markdownLanguage }),
@@ -56,6 +59,7 @@ export function SourceEditor({
     <CodeMirror
       value={value}
       onChange={onChange}
+      editable={!readOnly}
       extensions={extensions}
       basicSetup={{
         lineNumbers,

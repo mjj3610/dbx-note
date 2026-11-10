@@ -83,4 +83,13 @@ pub fn save_text_file(_params: &Value) -> RpcResult {
     }))
 }
 
+/// 非 Windows 没有系统打印通道：返回 unsupported，前端回退到浏览器打印
+pub fn print_html(_params: &Value) -> RpcResult {
+    Ok(serde_json::json!({
+        "opened": false,
+        "unsupported": true,
+        "message": "当前平台暂不支持系统打印窗口"
+    }))
+}
+
 pub fn shutdown() {}

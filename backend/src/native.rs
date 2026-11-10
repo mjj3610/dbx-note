@@ -1072,6 +1072,86 @@ fn sanitize_export_name(raw: &str, extension: &str) -> String {
     format!("{stem}.{extension}")
 }
 
+/* ---------------- PDF 打印预览 ---------------- */
+
+/// 打印预览页里注入的自动打印脚本：等图片与字体就绪后再唤起系统打印窗口
+const PRINT_SCRIPT: &str = "<script>window.addEventListener('load',function(){setTimeout(function(){window.print();},350);});</script>";
+
+/**
+ * PDF 导出：把可打印 HTML 交给系统默认浏览器，由浏览器唤起系统打印窗口。
+ *
+ * 参考项目用 Tauri 原生 WebView 打印窗口；DBX 插件页跑在 iframe 里，
+ * `window.open` / `iframe.print()` 常被沙箱静默吞掉，所以这里改由 Sidecar 写一份
+ * 临时 HTML 并用系统默认程序打开 —— 独立于宿主窗口，不受 iframe 沙箱约束。
+ * 用户在系统打印窗口里选择「另存为 PDF」，不再弹出「保存 xxx.print.html」的另存为框。
+ *
+ * @param params `{ name, html }`；`name` 只用于生成临时文件名
+ * @return `{ opened:true, path }` / `{ opened:false, unsupported:true, message }`；
+ *         自动化环境（设置 DBX_NOTE_EXPORT_AUTO_DIR）下返回 `{ opened:true, auto:true, path }`
+ */
+pub fn print_html(params: &serde_json::Value) -> RpcResult {
+    let name = sanitize_export_name(&crate::param_str(params, "name"), "html");
+    let html = crate::param_str(params, "html");
+    if html.trim().is_empty() {
+        return Err(RpcError::invalid("打印内容为空"));
+    }
+    if html.len() > EXPORT_MAX_CONTENT_BYTES {
+        return Err(RpcError::invalid("打印内容过大"));
+    }
+    let printable = inject_print_script(&html);
+    let dir = std::env::temp_dir().join("dbx-note-print");
+    std::fs::create_dir_all(&dir)
+        .map_err(|error| RpcError::internal(format!("创建打印目录失败：{error}")))?;
+    let path = dir.join(&name);
+    std::fs::write(&path, printable)
+        .map_err(|error| RpcError::internal(format!("写入打印预览失败：{error}")))?;
+    let display = path.to_string_lossy().to_string();
+
+    // e2e / smoke 不能真的打开浏览器：只落临时文件，回报「已唤起打印」
+    if std::env::var_os(EXPORT_AUTO_DIR_ENV).is_some() {
+        return Ok(json!({ "opened": true, "auto": true, "path": display }));
+    }
+    if open_in_default_app(&path) {
+        Ok(json!({ "opened": true, "path": display }))
+    } else {
+        Ok(json!({
+            "opened": false,
+            "unsupported": true,
+            "message": "无法打开系统默认浏览器，请改用「导出 HTML」后自行打印",
+        }))
+    }
+}
+
+/// 把自动打印脚本插到 `</body>` 前；没有 `</body>` 时直接追加
+fn inject_print_script(html: &str) -> String {
+    if let Some(position) = html.to_ascii_lowercase().rfind("</body>") {
+        let (head, _) = html.split_at(position);
+        format!("{head}{PRINT_SCRIPT}</body></html>")
+    } else {
+        format!("{html}{PRINT_SCRIPT}")
+    }
+}
+
+/// 用系统默认程序打开本地 HTML（Windows `start` / macOS `open` / Linux `xdg-open`）
+fn open_in_default_app(path: &std::path::Path) -> bool {
+    let target = path.to_string_lossy().to_string();
+    #[cfg(windows)]
+    {
+        return std::process::Command::new("cmd")
+            .args(["/C", "start", "", &target])
+            .spawn()
+            .is_ok();
+    }
+    #[cfg(target_os = "macos")]
+    {
+        return std::process::Command::new("open").arg(&target).spawn().is_ok();
+    }
+    #[cfg(all(not(windows), not(target_os = "macos")))]
+    {
+        return std::process::Command::new("xdg-open").arg(&target).spawn().is_ok();
+    }
+}
+
 /// 兜底：进程退出前停掉录音线程
 pub fn shutdown() {
     if let Ok(mut guard) = RECORDER.lock() {

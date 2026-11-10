@@ -29,8 +29,8 @@ import {
 } from '@/stores/settings'
 import { SettingPage, SettingSection } from './settings/Parts'
 
-/** 实际有调用点的用途；embedding / tts 暂未使用，等接入后再放出来 */
-const USAGE_TYPES: AiModelType[] = ['chat', 'vision', 'stt']
+/** 实际有调用点的用途；0.5.6 起 embedding 供知识库向量检索使用，tts 仍未接入 */
+const USAGE_TYPES: AiModelType[] = ['chat', 'vision', 'stt', 'embedding']
 
 function ModelTypeSelect({
   value,

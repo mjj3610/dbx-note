@@ -344,11 +344,74 @@ export interface ImportResult {
   paths: string[]
 }
 
-/** 知识库索引状态（文件树「显示知识库状态」用） */
-export interface KbStatus {
-  count: number
+/** 知识库统计：向量库状态 + 旧 UI 仍在用的 count / updatedAt 别名 */
+export interface RagStatus {
+  /** 是否已配置 embedding 模型 */
+  configured: boolean
+  embeddingModel: string
+  /** 已索引的来源数 */
+  sources: number
+  /** 向量分块数 */
+  chunks: number
+  /** embedding 维度，0 表示还没算过 */
+  dimension: number
+  lastIndexedAt: number
   paths: string[]
+  /** 被排除出知识库的文件 */
+  excluded: string[]
+  /** 关闭了自动计算的文件 */
+  autoDisabled: string[]
+  chunkSize: number
+  chunkOverlap: number
+  topK: number
+  threshold: number
+  /** 兼容 0.5.5 的字段：等于 sources */
+  count: number
+  /** 兼容 0.5.5 的字段：等于 lastIndexedAt */
   updatedAt: number
+}
+
+/** 索引 / 检索可调参数；不传时后端读设置里的默认值 */
+export interface RagOptions {
+  chunkSize?: number
+  chunkOverlap?: number
+  topK?: number
+  threshold?: number
+}
+
+/** 一条检索命中 */
+export interface RagSearchHit {
+  path: string
+  title: string
+  content: string
+  score: number
+  chunkId: number
+  matched: 'vector' | 'lexical' | 'hybrid'
+}
+
+export interface RagSearchResult {
+  items: RagSearchHit[]
+  /** 可直接拼进 AI 系统提示词的上下文 */
+  context: string
+  sources: string[]
+  configured: boolean
+  tookMs: number
+}
+
+/** 批量索引结果 */
+export interface RagIndexResult {
+  indexed: number
+  chunks: number
+  skipped: number
+  updatedAt: number
+  failed: string[]
+}
+
+/** 单篇笔记的「自动计算 / 包含」开关 */
+export interface RagFileFlags {
+  path: string
+  autoCalc: boolean
+  included: boolean
 }
 
 /** 复制 / 创建副本；duplicate=true 时自动生成「副本」名 */
@@ -370,6 +433,11 @@ export function revealEntry(path: string): Promise<{ ok: boolean; path: string }
   return call('fs/reveal', { path })
 }
 
+/** 在插件之外的独立窗口用系统默认程序打开该文件 */
+export function openExternal(path: string): Promise<{ ok: boolean; path: string }> {
+  return call('fs/openExternal', { path })
+}
+
 /** 批量导入（前端已解包 / 转码） */
 export function importEntries(params: {
   target: string
@@ -383,28 +451,80 @@ export function listTemplates(): Promise<{ items: TemplateItem[] }> {
   return call('fs/templates', {})
 }
 
-export function kbStatus(): Promise<KbStatus> {
-  return call('kb/status', {})
+/** 知识库统计（0.5.6 起读向量库，补上旧字段别名保证旧 UI 不炸） */
+export async function kbStatus(): Promise<RagStatus> {
+  const status = await call<Omit<RagStatus, 'count' | 'updatedAt'>>('kb/vectorStatus', {})
+  return { ...status, count: status.sources, updatedAt: status.lastIndexedAt }
 }
 
-/** 全量重建索引（「全部重新计算」） */
-export function kbReindex(): Promise<{ count: number; updatedAt: number }> {
-  return call('kb/reindex', {}, WRITE_TIMEOUT)
+/** 全量重新计算向量（「全部重新计算」） */
+export function kbReindexAll(options: RagOptions = {}): Promise<RagIndexResult> {
+  return call('kb/reindexAll', options, 180_000)
 }
 
-/** 单篇增量更新（「自动更新知识库」开启时保存后调用） */
-export function kbUpsert(path: string): Promise<{ count: number }> {
-  return call('kb/upsert', { path })
+/** 单篇笔记计算 / 更新向量 */
+export function kbIndexFile(path: string, options: RagOptions = {}): Promise<RagIndexResult> {
+  return call('kb/indexFile', { path, ...options }, 180_000)
 }
 
-/** 取完整索引 JSON，供「上传知识库」另存为 */
-export function kbExport(): Promise<{ json: string }> {
-  return call('kb/export', {})
+/** 整个文件夹批量计算向量 */
+export function kbIndexFolder(path: string, options: RagOptions = {}): Promise<RagIndexResult> {
+  return call('kb/indexFolder', { path, ...options }, 180_000)
 }
 
-/** 从快照恢复索引（「下载知识库」） */
-export function kbImport(json: string): Promise<{ count: number }> {
-  return call('kb/import', { json }, WRITE_TIMEOUT)
+/** 删除某文件 / 文件夹下的向量 */
+export function kbDeleteVectors(path: string): Promise<{ deleted: number }> {
+  return call('kb/deleteVectors', { path }, WRITE_TIMEOUT)
+}
+
+/** 查询 / 设置单篇笔记的自动计算与包含开关；不传开关即为查询 */
+export function kbFlags(params: {
+  path: string
+  autoCalc?: boolean
+  included?: boolean
+}): Promise<RagFileFlags> {
+  return call('kb/flags', params)
+}
+
+/** 清空整个知识库索引（高危，UI 必须二次确认） */
+export function kbClearIndex(): Promise<{ cleared: number }> {
+  return call('kb/clear', {}, WRITE_TIMEOUT)
+}
+
+/** 向量 + BM25 混合检索 */
+export function kbSearch(params: {
+  query: string
+  topK?: number
+  threshold?: number
+}): Promise<RagSearchResult> {
+  return call('kb/search', params, 120_000)
+}
+
+/** 导出快照（同时写到工作区 .dbx-note/rag-snapshot.json 供云同步） */
+export function kbExportSnapshot(): Promise<{
+  json: string
+  path: string
+  count: number
+  vectorCount: number
+}> {
+  return call('kb/snapshotExport', {}, WRITE_TIMEOUT)
+}
+
+/** 从快照恢复（不传 json 时读工作区快照文件） */
+export function kbImportSnapshot(params: { json?: string } = {}): Promise<{
+  count: number
+  vectorCount: number
+  dimension: number
+}> {
+  return call('kb/snapshotImport', params, WRITE_TIMEOUT)
+}
+
+/** PDF 打印预览：Sidecar 写临时 HTML 并交给系统默认浏览器唤起打印窗口 */
+export function printHtml(params: {
+  name: string
+  html: string
+}): Promise<{ opened: boolean; path?: string; auto?: boolean; unsupported?: boolean; message?: string }> {
+  return call('dialog/printHtml', params, 60_000)
 }
 
 export function saveImage(

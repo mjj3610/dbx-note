@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import {
+  BookOpen,
   ChevronRight,
   ChevronsDownUp,
   ChevronsUpDown,
@@ -10,6 +11,7 @@ import {
   Copy,
   Database,
   ExternalLink,
+  FileDown,
   FilePlus2,
   FileText,
   Files,
@@ -22,6 +24,7 @@ import {
   Pencil,
   RefreshCcwDot,
   Scissors,
+  SquareArrowOutUpRight,
   Trash2,
   Upload,
 } from 'lucide-react'
@@ -54,6 +57,7 @@ import {
   revealEntry,
   targetDirOf,
 } from '@/lib/fileActions'
+import { exportMarkdown, type ExportFormat } from '@/lib/markdownExport'
 import * as rpc from '@/lib/rpc'
 import type { TemplateItem, TreeNode } from '@/lib/rpc'
 import { findTreeNode } from '@/lib/tree'
@@ -68,6 +72,9 @@ interface FileTreeProps {
   nodes: TreeNode[]
   keyword: string
 }
+
+/** 文件右键「导出」子菜单的四种格式（与编辑器底栏一致） */
+const EXPORT_FORMATS: ExportFormat[] = ['markdown', 'html', 'json', 'pdf']
 
 /** 把异常转成可展示文案 */
 function errorMessage(error: unknown): string {
@@ -98,8 +105,11 @@ async function pasteInto(targetDir: string): Promise<boolean> {
  * 工作区文件树
  *
  * 目录在前、文件在后；支持内联新建 / 重命名、删除确认、右键菜单与快捷键。
- * 右键菜单对齐参考项目 `file-item.tsx`：新建、展开折叠、查看目录、模板、
- * 知识库、剪切 / 复制 / 创建副本 / 粘贴、上传下载文件夹、重命名、删除。
+ * 0.5.6 起右键菜单按参考项目拆成两套，由 `node.isFolder` 分派：
+ * - 文件夹（`folder-item/index.tsx`）：新建文件 / 文件夹、展开折叠、查看目录、
+ *   模板、知识库批量向量、剪切 / 复制 / 创建副本 / 粘贴、上传下载文件夹、重命名、删除；
+ * - 文件（`file-item.tsx`）：在新窗口打开、只读打开、查看目录、模板、导出四格式、
+ *   上传文件、知识库单篇向量与开关、剪切 / 复制 / 粘贴、重命名、删除。
  */
 export function FileTree({ nodes, keyword }: FileTreeProps) {
   const t = useT()
@@ -386,9 +396,313 @@ function TreeRow({
     toast.success(t('files.more.remoteDone', { count }))
   }
 
+  /* ---------------- 参考项目 file-item.tsx 的文件专属动作 ---------------- */
+
+  /** 右键菜单打开时读一次这篇笔记的知识库开关 */
+  const [kbFlags, setKbFlags] = useState<rpc.RagFileFlags | null>(null)
+
+  /** 索引 / 检索参数统一取设置页的 RAG 配置 */
+  const ragOptions = () => {
+    const rag = useSettingsStore.getState().rag
+    return {
+      chunkSize: rag.chunkSize,
+      chunkOverlap: rag.chunkOverlap,
+      topK: rag.topK,
+      threshold: rag.threshold,
+    }
+  }
+
+  const indexVectors = async () => {
+    const result = isFolder
+      ? await rpc.kbIndexFolder(node.path, ragOptions())
+      : await rpc.kbIndexFile(node.path, ragOptions())
+    await refreshKb()
+    toast.success(t('files.ctx.kbUpdated'))
+    if (result.failed.length > 0) {
+      toast.error(t('files.ctx.actionFailed', { message: result.failed.join('; ') }))
+    }
+  }
+
+  const deleteVectors = async () => {
+    const result = await rpc.kbDeleteVectors(node.path)
+    await refreshKb()
+    toast.success(t('files.ctx.vectorsDeleted', { count: result.deleted }))
+  }
+
+  const reindexAll = async () => {
+    const result = await rpc.kbReindexAll(ragOptions())
+    await refreshKb()
+    toast.success(t('files.more.reindexed', { count: result.indexed }))
+  }
+
+  /** 在系统默认程序里开一个独立窗口（DBX 宿主只允许单个 iframe） */
+  const openExternal = async () => {
+    await rpc.openExternal(node.path)
+    toast.success(t('files.ctx.openedExternal'))
+  }
+
+  /** 只读打开：先标记再打开，编辑器会禁用输入与保存 */
+  const openReadOnly = async () => {
+    useUiStore.getState().setReadOnly(node.path, true)
+    await open(node.path)
+    toast.success(t('files.ctx.readOnlyOpened'))
+  }
+
+  /** 文件右键导出：正文从磁盘读，导出链路与编辑器底栏完全共用 */
+  const exportAs = async (format: ExportFormat) => {
+    const file = await rpc.readFile(node.path)
+    const outcome = await exportMarkdown(format, { path: node.path, markdown: file.content })
+    if (!outcome.saved && outcome.message) {
+      toast.error(outcome.message)
+      return
+    }
+    if (!outcome.saved) return
+    if (outcome.printed) {
+      toast.success(t('footer.exportPdfOpened'))
+    } else {
+      toast.success(
+        t('footer.exportSavedAt', { filename: outcome.filename ?? '', path: outcome.path ?? '' }),
+      )
+    }
+  }
+
+  /** 上传单个 / 多个本地文件到该文件所在目录 */
+  const uploadFile = async () => {
+    const result = await importLocalFiles(parentDir, 'notes', {
+      multiple: true,
+      accept: '.md,.markdown,.txt',
+    })
+    if (!result) return
+    await useNotesStore.getState().loadTree()
+    toast.success(t('files.more.imported', { count: result.imported }))
+  }
+
+  /** 模板子菜单（参考项目的「插件命令组」，两套菜单都有） */
+  const templateSubmenu = (
+    <ContextMenuSub>
+      <ContextMenuSubTrigger data-tree-action="template">
+        <LayoutTemplate />
+        {t('files.ctx.fromTemplate')}
+      </ContextMenuSubTrigger>
+      <ContextMenuSubContent>
+        {templates.length === 0 ? (
+          <ContextMenuLabel>{t('files.ctx.noTemplates')}</ContextMenuLabel>
+        ) : (
+          templates.map((template) => (
+            <ContextMenuItem
+              key={template.path}
+              onSelect={() =>
+                void runAction(
+                  t,
+                  async () => {
+                    await createFromTemplate(parentDir, template)
+                    await useNotesStore.getState().loadTree()
+                  },
+                  'files.ctx.fromTemplateDone',
+                )
+              }
+            >
+              <FileText />
+              {template.name}
+            </ContextMenuItem>
+          ))
+        )}
+      </ContextMenuSubContent>
+    </ContextMenuSub>
+  )
+
+  /** 视图开关放在两套菜单末尾，右键时就能直接改偏好 */
+  const viewSwitches = (
+    <>
+      <ContextMenuSeparator />
+      <ContextMenuLabel>{t('files.more.view')}</ContextMenuLabel>
+      <ContextMenuCheckboxItem
+        checked={showKbStatus}
+        onCheckedChange={(checked) => {
+          useSettingsStore.getState().patchFileView({ showKnowledgeBaseStatus: Boolean(checked) })
+          if (checked) void refreshKb()
+        }}
+        data-tree-action="show-kb"
+      >
+        <Database />
+        {t('files.more.showKbStatus')}
+      </ContextMenuCheckboxItem>
+      <ContextMenuCheckboxItem
+        checked={syncStaticAssets}
+        onCheckedChange={(checked) =>
+          useSettingsStore.getState().patchFileView({ syncStaticAssets: Boolean(checked) })
+        }
+        data-tree-action="sync-assets"
+      >
+        <CloudUpload />
+        {t('files.more.syncAssets')}
+      </ContextMenuCheckboxItem>
+    </>
+  )
+
+  /** 重命名 / 删除两套菜单相同 */
+  const renameDelete = (
+    <>
+      <ContextMenuItem
+        onSelect={() => {
+          useNotesStore.getState().expandTo(node.path)
+          startRename(node.path)
+        }}
+        data-tree-action="rename"
+      >
+        <Pencil />
+        {t('common.rename')}
+        <ContextMenuShortcut>F2</ContextMenuShortcut>
+      </ContextMenuItem>
+      <ContextMenuItem
+        className="text-destructive data-[highlighted]:bg-destructive/10 data-[highlighted]:text-destructive"
+        onSelect={() => confirmDelete(node.path)}
+        data-tree-action="delete"
+      >
+        <Trash2 />
+        {t('common.delete')}
+        <ContextMenuShortcut>Del</ContextMenuShortcut>
+      </ContextMenuItem>
+    </>
+  )
+
+  /** 剪切 / 复制 / 粘贴两套菜单相同；创建副本只有文件夹有（与参考项目一致） */
+  const clipboardItems = (
+    <>
+      <ContextMenuItem
+        onSelect={() => {
+          setFileClipboard({ mode: 'cut', path: node.path })
+          toast.success(t('files.ctx.cutDone'))
+        }}
+        data-tree-action="cut"
+      >
+        <Scissors />
+        {t('files.ctx.cut')}
+        <ContextMenuShortcut>Ctrl+X</ContextMenuShortcut>
+      </ContextMenuItem>
+      <ContextMenuItem
+        onSelect={() => {
+          setFileClipboard({ mode: 'copy', path: node.path })
+          toast.success(t('files.ctx.copyDone'))
+        }}
+        data-tree-action="copy"
+      >
+        <Copy />
+        {t('files.ctx.copy')}
+        <ContextMenuShortcut>Ctrl+C</ContextMenuShortcut>
+      </ContextMenuItem>
+      {isFolder ? (
+        <ContextMenuItem
+          onSelect={() =>
+            void runAction(
+              t,
+              async () => {
+                const result = await duplicateEntry(node.path)
+                await useNotesStore.getState().loadTree()
+                if (result) toast.success(t('files.ctx.duplicated'))
+              },
+            )
+          }
+          data-tree-action="duplicate"
+        >
+          <Files />
+          {t('files.ctx.duplicate')}
+        </ContextMenuItem>
+      ) : null}
+      <ContextMenuItem
+        disabled={!fileClipboard}
+        onSelect={() =>
+          void runAction(t, async () => {
+            if (await pasteInto(targetDir)) toast.success(t('files.ctx.pasted'))
+          })
+        }
+        data-tree-action="paste"
+      >
+        <ClipboardPaste />
+        {t('files.ctx.paste')}
+        <ContextMenuShortcut>Ctrl+V</ContextMenuShortcut>
+      </ContextMenuItem>
+    </>
+  )
+
+  /** 知识库子菜单：文件夹是批量操作，文件是单篇 + 两个开关 */
+  const knowledgeSubmenu = (
+    <ContextMenuSub>
+      <ContextMenuSubTrigger data-tree-action="kb">
+        <Database />
+        {t('files.ctx.kb')}
+      </ContextMenuSubTrigger>
+      <ContextMenuSubContent>
+        <ContextMenuItem
+          onSelect={() => void runAction(t, indexVectors)}
+          data-tree-action={isFolder ? 'kb-calc-folder' : 'kb-calc'}
+        >
+          <RefreshCcwDot />
+          {isFolder ? t('files.ctx.kbCalcFolder') : t('files.ctx.kbCalcVectors')}
+        </ContextMenuItem>
+        <ContextMenuItem
+          onSelect={() => void runAction(t, deleteVectors)}
+          data-tree-action={isFolder ? 'kb-delete-folder' : 'kb-delete'}
+        >
+          <Trash2 />
+          {isFolder ? t('files.ctx.kbDeleteFolder') : t('files.ctx.kbDeleteVectors')}
+        </ContextMenuItem>
+        {isFolder ? null : (
+          <>
+            <ContextMenuSeparator />
+            <ContextMenuCheckboxItem
+              checked={kbFlags?.autoCalc ?? true}
+              onCheckedChange={(checked) =>
+                void runAction(t, async () => {
+                  setKbFlags(
+                    await rpc.kbFlags({ path: node.path, autoCalc: Boolean(checked) }),
+                  )
+                  toast.success(t('files.ctx.flagsUpdated'))
+                })
+              }
+              data-tree-action="kb-auto-calc"
+            >
+              {t('files.ctx.kbAutoCalc')}
+            </ContextMenuCheckboxItem>
+            <ContextMenuCheckboxItem
+              checked={kbFlags?.included ?? true}
+              onCheckedChange={(checked) =>
+                void runAction(t, async () => {
+                  setKbFlags(
+                    await rpc.kbFlags({ path: node.path, included: Boolean(checked) }),
+                  )
+                  toast.success(t('files.ctx.flagsUpdated'))
+                })
+              }
+              data-tree-action="kb-included"
+            >
+              {t('files.ctx.kbIncluded')}
+            </ContextMenuCheckboxItem>
+          </>
+        )}
+        <ContextMenuSeparator />
+        <ContextMenuItem onSelect={() => void runAction(t, reindexAll)} data-tree-action="kb-reindex-all">
+          <RefreshCcwDot />
+          {t('files.ctx.kbReindexAll')}
+        </ContextMenuItem>
+      </ContextMenuSubContent>
+    </ContextMenuSub>
+  )
+
   return (
     <>
-      <ContextMenu onOpenChange={(opened) => { if (opened) onFocusTree(node.path) }}>
+      <ContextMenu
+        onOpenChange={(opened) => {
+          if (!opened) return
+          onFocusTree(node.path)
+          if (!isFolder && !isRemoteOnly) {
+            void rpc
+              .kbFlags({ path: node.path })
+              .then(setKbFlags)
+              .catch(() => setKbFlags(null))
+          }
+        }}
+      >
         <ContextMenuTrigger asChild>
           <div
             className="file-row relative"
@@ -453,16 +767,20 @@ function TreeRow({
           </div>
         </ContextMenuTrigger>
 
-        <ContextMenuContent className="w-56" data-tree-menu>
+        <ContextMenuContent
+          className="w-56"
+          data-tree-menu
+          data-tree-kind={isFolder ? 'folder' : 'file'}
+        >
           {isRemoteOnly ? (
             // 本地磁盘上还没有这个条目：只提供下载，重命名 / 删除要等落地后才有意义
             <ContextMenuItem onSelect={downloadWithToast} data-tree-action="download">
               <CloudDownload />
               {isFolder ? t('files.downloadRemoteFolder') : t('files.downloadRemote')}
             </ContextMenuItem>
-          ) : (
+          ) : isFolder ? (
+            /* ---- 文件夹菜单：参考项目 folder-item/index.tsx ---- */
             <>
-              {/* 新建 */}
               <ContextMenuItem onSelect={() => createHere('file')} data-tree-action="new-file">
                 <FilePlus2 />
                 {t('sidebar.newNote')}
@@ -471,29 +789,22 @@ function TreeRow({
                 <FolderPlus />
                 {t('sidebar.newFolder')}
               </ContextMenuItem>
-
-              {/* 展开 / 折叠 */}
-              {isFolder ? (
-                <>
-                  <ContextMenuSeparator />
-                  {isOpen ? (
-                    <ContextMenuItem onSelect={() => toggleExpand(node.path)} data-tree-action="collapse">
-                      <ChevronsDownUp />
-                      {t('files.ctx.collapse')}
-                    </ContextMenuItem>
-                  ) : (
-                    <ContextMenuItem onSelect={() => toggleExpand(node.path)} data-tree-action="expand">
-                      <ChevronsUpDown />
-                      {t('files.ctx.expand')}
-                    </ContextMenuItem>
-                  )}
-                  <ContextMenuItem onSelect={collapseAll} data-tree-action="collapse-all">
-                    <ChevronsDownUp />
-                    {t('files.more.collapseAll')}
-                  </ContextMenuItem>
-                </>
-              ) : null}
-
+              <ContextMenuSeparator />
+              {isOpen ? (
+                <ContextMenuItem onSelect={() => toggleExpand(node.path)} data-tree-action="collapse">
+                  <ChevronsDownUp />
+                  {t('files.ctx.collapse')}
+                </ContextMenuItem>
+              ) : (
+                <ContextMenuItem onSelect={() => toggleExpand(node.path)} data-tree-action="expand">
+                  <ChevronsUpDown />
+                  {t('files.ctx.expand')}
+                </ContextMenuItem>
+              )}
+              <ContextMenuItem onSelect={collapseAll} data-tree-action="collapse-all">
+                <ChevronsDownUp />
+                {t('files.more.collapseAll')}
+              </ContextMenuItem>
               <ContextMenuSeparator />
               <ContextMenuItem
                 onSelect={() => void runAction(t, () => revealEntry(node.path), 'files.ctx.revealed')}
@@ -502,201 +813,87 @@ function TreeRow({
                 <ExternalLink />
                 {t('files.ctx.reveal')}
               </ContextMenuItem>
-
-              {/* 从模板新建笔记 */}
+              {templateSubmenu}
+              <ContextMenuSeparator />
+              {knowledgeSubmenu}
+              <ContextMenuSeparator />
+              {clipboardItems}
+              <ContextMenuSeparator />
+              <ContextMenuItem
+                onSelect={() => void runAction(t, () => uploadFolder(node.path))}
+                data-tree-action="upload-folder"
+              >
+                <Upload />
+                {t('files.ctx.uploadFolder')}
+              </ContextMenuItem>
+              <ContextMenuItem
+                onSelect={() => void runAction(t, () => downloadFolder(node.path))}
+                data-tree-action="download-folder"
+              >
+                <HardDriveDownload />
+                {t('files.ctx.downloadFolder')}
+              </ContextMenuItem>
+              <ContextMenuSeparator />
+              {renameDelete}
+              {viewSwitches}
+            </>
+          ) : (
+            /* ---- 文件菜单：参考项目 file-item.tsx ---- */
+            <>
+              <ContextMenuItem
+                onSelect={() => void runAction(t, openExternal)}
+                data-tree-action="open-new-window"
+              >
+                <SquareArrowOutUpRight />
+                {t('files.ctx.openInNewWindow')}
+              </ContextMenuItem>
+              <ContextMenuItem
+                onSelect={() => void runAction(t, openReadOnly)}
+                data-tree-action="open-read-only"
+              >
+                <BookOpen />
+                {t('files.ctx.openReadOnly')}
+              </ContextMenuItem>
+              <ContextMenuSeparator />
+              <ContextMenuItem
+                onSelect={() => void runAction(t, () => revealEntry(node.path), 'files.ctx.revealed')}
+                data-tree-action="reveal"
+              >
+                <ExternalLink />
+                {t('files.ctx.reveal')}
+              </ContextMenuItem>
+              {templateSubmenu}
               <ContextMenuSub>
-                <ContextMenuSubTrigger data-tree-action="template">
-                  <LayoutTemplate />
-                  {t('files.ctx.fromTemplate')}
+                <ContextMenuSubTrigger data-tree-action="export">
+                  <FileDown />
+                  {t('files.ctx.export')}
                 </ContextMenuSubTrigger>
                 <ContextMenuSubContent>
-                  {templates.length === 0 ? (
-                    <ContextMenuLabel>{t('files.ctx.noTemplates')}</ContextMenuLabel>
-                  ) : (
-                    templates.map((template) => (
-                      <ContextMenuItem
-                        key={template.path}
-                        onSelect={() =>
-                          void runAction(
-                            t,
-                            async () => {
-                              await createFromTemplate(parentDir, template)
-                              await useNotesStore.getState().loadTree()
-                            },
-                            'files.ctx.fromTemplateDone',
-                          )
-                        }
-                      >
-                        <FileText />
-                        {template.name}
-                      </ContextMenuItem>
-                    ))
-                  )}
+                  {EXPORT_FORMATS.map((format) => (
+                    <ContextMenuItem
+                      key={format}
+                      data-tree-export={format}
+                      onSelect={() => void runAction(t, () => exportAs(format))}
+                    >
+                      {t(`footer.format.${format}`)}
+                    </ContextMenuItem>
+                  ))}
                 </ContextMenuSubContent>
               </ContextMenuSub>
-
-              {/* 知识库 */}
-              <ContextMenuSub>
-                <ContextMenuSubTrigger data-tree-action="kb">
-                  <Database />
-                  {t('files.ctx.kb')}
-                </ContextMenuSubTrigger>
-                <ContextMenuSubContent>
-                  <ContextMenuItem
-                    disabled={isFolder}
-                    onSelect={() =>
-                      void runAction(
-                        t,
-                        async () => {
-                          await rpc.kbUpsert(node.path)
-                          await refreshKb()
-                        },
-                        'files.ctx.kbUpdated',
-                      )
-                    }
-                  >
-                    <Database />
-                    {t('files.ctx.kbUpdate')}
-                  </ContextMenuItem>
-                  <ContextMenuItem
-                    onSelect={() =>
-                      void runAction(
-                        t,
-                        async () => {
-                          const result = await rpc.kbReindex()
-                          await refreshKb()
-                          toast.success(t('files.more.reindexed', { count: result.count }))
-                        },
-                      )
-                    }
-                  >
-                    <RefreshCcwDot />
-                    {t('files.ctx.kbReindexAll')}
-                  </ContextMenuItem>
-                </ContextMenuSubContent>
-              </ContextMenuSub>
-
+              <ContextMenuItem
+                onSelect={() => void runAction(t, uploadFile)}
+                data-tree-action="upload-file"
+              >
+                <Upload />
+                {t('files.ctx.uploadFile')}
+              </ContextMenuItem>
               <ContextMenuSeparator />
-              {/* 剪贴板 */}
-              <ContextMenuItem
-                onSelect={() => {
-                  setFileClipboard({ mode: 'cut', path: node.path })
-                  toast.success(t('files.ctx.cutDone'))
-                }}
-                data-tree-action="cut"
-              >
-                <Scissors />
-                {t('files.ctx.cut')}
-                <ContextMenuShortcut>Ctrl+X</ContextMenuShortcut>
-              </ContextMenuItem>
-              <ContextMenuItem
-                onSelect={() => {
-                  setFileClipboard({ mode: 'copy', path: node.path })
-                  toast.success(t('files.ctx.copyDone'))
-                }}
-                data-tree-action="copy"
-              >
-                <Copy />
-                {t('files.ctx.copy')}
-                <ContextMenuShortcut>Ctrl+C</ContextMenuShortcut>
-              </ContextMenuItem>
-              <ContextMenuItem
-                onSelect={() =>
-                  void runAction(
-                    t,
-                    async () => {
-                      const result = await duplicateEntry(node.path)
-                      await useNotesStore.getState().loadTree()
-                      if (result) toast.success(t('files.ctx.duplicated'))
-                    },
-                  )
-                }
-                data-tree-action="duplicate"
-              >
-                <Files />
-                {t('files.ctx.duplicate')}
-              </ContextMenuItem>
-              <ContextMenuItem
-                disabled={!fileClipboard}
-                onSelect={() =>
-                  void runAction(t, async () => {
-                    if (await pasteInto(targetDir)) toast.success(t('files.ctx.pasted'))
-                  })
-                }
-                data-tree-action="paste"
-              >
-                <ClipboardPaste />
-                {t('files.ctx.paste')}
-                <ContextMenuShortcut>Ctrl+V</ContextMenuShortcut>
-              </ContextMenuItem>
-
-              {/* 上传 / 下载文件夹 */}
-              {isFolder ? (
-                <>
-                  <ContextMenuSeparator />
-                  <ContextMenuItem
-                    onSelect={() => void runAction(t, () => uploadFolder(node.path))}
-                    data-tree-action="upload-folder"
-                  >
-                    <Upload />
-                    {t('files.ctx.uploadFolder')}
-                  </ContextMenuItem>
-                  <ContextMenuItem
-                    onSelect={() => void runAction(t, () => downloadFolder(node.path))}
-                    data-tree-action="download-folder"
-                  >
-                    <HardDriveDownload />
-                    {t('files.ctx.downloadFolder')}
-                  </ContextMenuItem>
-                </>
-              ) : null}
-
+              {knowledgeSubmenu}
               <ContextMenuSeparator />
-              <ContextMenuItem
-                onSelect={() => {
-                  useNotesStore.getState().expandTo(node.path)
-                  startRename(node.path)
-                }}
-                data-tree-action="rename"
-              >
-                <Pencil />
-                {t('common.rename')}
-                <ContextMenuShortcut>F2</ContextMenuShortcut>
-              </ContextMenuItem>
-              <ContextMenuItem
-                className="text-destructive data-[highlighted]:bg-destructive/10 data-[highlighted]:text-destructive"
-                onSelect={() => confirmDelete(node.path)}
-                data-tree-action="delete"
-              >
-                <Trash2 />
-                {t('common.delete')}
-                <ContextMenuShortcut>Del</ContextMenuShortcut>
-              </ContextMenuItem>
-
-              {/* 开关项放在最后，方便右键时直接改视图偏好 */}
+              {clipboardItems}
               <ContextMenuSeparator />
-              <ContextMenuLabel>{t('files.more.view')}</ContextMenuLabel>
-              <ContextMenuCheckboxItem
-                checked={showKbStatus}
-                onCheckedChange={(checked) => {
-                  useSettingsStore.getState().patchFileView({ showKnowledgeBaseStatus: Boolean(checked) })
-                  if (checked) void refreshKb()
-                }}
-                data-tree-action="show-kb"
-              >
-                <Database />
-                {t('files.more.showKbStatus')}
-              </ContextMenuCheckboxItem>
-              <ContextMenuCheckboxItem
-                checked={syncStaticAssets}
-                onCheckedChange={(checked) =>
-                  useSettingsStore.getState().patchFileView({ syncStaticAssets: Boolean(checked) })
-                }
-                data-tree-action="sync-assets"
-              >
-                <CloudUpload />
-                {t('files.more.syncAssets')}
-              </ContextMenuCheckboxItem>
+              {renameDelete}
+              {viewSwitches}
             </>
           )}
         </ContextMenuContent>

@@ -440,32 +440,66 @@ async function main() {
   }
   check('查看目录拒绝不存在的条目', revealMissingBlocked)
 
-  const kbBefore = await call('kb/status')
-  check('知识库索引初始为空', kbBefore.count === 0, JSON.stringify(kbBefore))
-  const reindexed = await call('kb/reindex')
-  check('全部重新计算收录工作区笔记', reindexed.count >= 3, JSON.stringify(reindexed))
-  const kbAfter = await call('kb/status')
-  check('索引状态列出已收录路径', kbAfter.paths.includes(renamed.path), JSON.stringify(kbAfter))
-  const upserted = await call('kb/upsert', { path: '导入/一篇笔记.md' })
-  check('单篇更新索引后条目数不减少', upserted.count >= reindexed.count, JSON.stringify(upserted))
-  let invalidUpsertBlocked = false
-  try {
-    await call('kb/upsert', { path: '日记' })
-  } catch {
-    invalidUpsertBlocked = true
-  }
-  check('拒绝把目录写进知识库索引', invalidUpsertBlocked)
-  const kbSnapshot = await call('kb/export')
-  check('上传知识库导出合法 JSON', JSON.parse(kbSnapshot.json).docs.length >= 3)
-  const kbRestored = await call('kb/import', { json: kbSnapshot.json })
-  check('下载知识库按快照恢复索引', kbRestored.count >= 3, JSON.stringify(kbRestored))
+  // 知识库：0.5.6 向量库（embedding + BM25 混合检索），旧版 kb/status 等 RPC 保留兼容
+  const vectorBefore = await call('kb/vectorStatus')
+  check('向量库状态结构完整',
+    typeof vectorBefore.sources === 'number'
+      && typeof vectorBefore.configured === 'boolean'
+      && Array.isArray(vectorBefore.paths),
+    JSON.stringify(vectorBefore))
+  const reindexed = await call('kb/reindexAll')
+  check('全部重新计算收录工作区笔记', reindexed.indexed >= 3, JSON.stringify(reindexed))
+  const vectorAfter = await call('kb/vectorStatus')
+  check('索引状态列出已收录路径', vectorAfter.paths.includes(renamed.path), JSON.stringify(vectorAfter))
+  const indexedOne = await call('kb/indexFile', { path: '导入/一篇笔记.md' })
+  check('单篇计算 / 更新向量可用', typeof indexedOne.indexed === 'number', JSON.stringify(indexedOne))
+  const badIndex = await call('kb/indexFile', { path: '日记' })
+  check('目录不会被写进知识库索引',
+    badIndex.indexed === 0 || badIndex.failed.includes('日记'), JSON.stringify(badIndex))
+  const fileFlags = await call('kb/flags', { path: renamed.path, included: false })
+  check('知识库「包含在知识库中」开关可写入', fileFlags.included === false, JSON.stringify(fileFlags))
+  await call('kb/flags', { path: renamed.path, included: true })
+  const ragSearch = await call('kb/search', { query: '需求' })
+  check('混合检索返回结构化结果',
+    Array.isArray(ragSearch.items) && typeof ragSearch.context === 'string'
+      && Array.isArray(ragSearch.sources),
+    JSON.stringify(ragSearch).slice(0, 300))
+  const snapshot = await call('kb/snapshotExport')
+  check('上传知识库导出合法快照', JSON.parse(snapshot.json).sources.length >= 3)
+  const restored = await call('kb/snapshotImport', { json: snapshot.json })
+  check('下载知识库按快照恢复索引', restored.count >= 3, JSON.stringify(restored))
   let badKbBlocked = false
   try {
-    await call('kb/import', { json: '{"oops":1}' })
+    await call('kb/snapshotImport', { json: '{"oops":1}' })
   } catch {
     badKbBlocked = true
   }
-  check('拒绝缺少 docs 的知识库快照', badKbBlocked)
+  check('拒绝版本不兼容的知识库快照', badKbBlocked)
+  const deletedVectors = await call('kb/deleteVectors', { path: '导入' })
+  check('删除指定路径下的向量可用', typeof deletedVectors.deleted === 'number', JSON.stringify(deletedVectors))
+  // 旧版兼容 RPC：0.5.5 的调用方仍能拿到 count / paths / updatedAt
+  const legacyStatus = await call('kb/status')
+  check('旧版 kb/status 仍返回兼容字段',
+    typeof legacyStatus.count === 'number' && Array.isArray(legacyStatus.paths),
+    JSON.stringify(legacyStatus))
+  const legacyExport = await call('kb/export')
+  check('旧版 kb/export 仍返回 JSON', typeof JSON.parse(legacyExport.json).schemaVersion === 'number')
+  // 文件右键「在新窗口打开」：用不存在路径验证 RPC 已注册并会校验
+  let openExternalBlocked = false
+  try {
+    await call('fs/openExternal', { path: '不存在的条目.md' })
+  } catch {
+    openExternalBlocked = true
+  }
+  check('新窗口打开拒绝不存在的条目', openExternalBlocked)
+  // PDF 打印预览：只验证参数校验，不在自检里真的拉起浏览器
+  let emptyPrintBlocked = false
+  try {
+    await call('dialog/printHtml', { name: 'preview.html', html: '' })
+  } catch {
+    emptyPrintBlocked = true
+  }
+  check('打印预览拒绝空内容', emptyPrintBlocked)
 
   // 记录与标签
   const record = await call('record/create', {

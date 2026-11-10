@@ -48,12 +48,12 @@ import {
   CanvasSection,
   PluginsSection,
   PromptSection,
-  RagSection,
   RecordSection,
   ShortcutsSection,
   TemplateSection,
   WebSearchSection,
 } from './SettingsSections'
+import { RagSection } from './settings/RagSection'
 import { MemoriesSection, SkillsSection } from './SettingsAssistant'
 import { BackupSection, SyncSection } from './SettingsSync'
 import { ToolsSection } from './SettingsTools'

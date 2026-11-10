@@ -51,6 +51,8 @@ export function EditorPane() {
   const confirmDelete = useUiStore((state) => state.confirmDelete)
   const setDirPickerOpen = useUiStore((state) => state.setDirPickerOpen)
   const sidePane = useUiStore((state) => state.sidePane)
+  const readOnlyPaths = useUiStore((state) => state.readOnlyPaths)
+  const readOnly = Boolean(activePath && readOnlyPaths.includes(activePath))
 
   const [mode, setMode] = useState<'visual' | 'source'>('visual')
   /** 编辑方式与源码显示偏好取自设置页（与 NoteGen 的默认编辑模式一致） */
@@ -118,6 +120,17 @@ export function EditorPane() {
   return (
     <div className="flex h-full min-h-0 flex-col bg-background">
       <EditorTabBar>
+        {readOnly ? (
+          <button
+            type="button"
+            className="mr-1 shrink-0 rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground transition-colors hover:text-foreground"
+            data-editor-readonly="1"
+            title={t('editor.exitReadOnly')}
+            onClick={() => useUiStore.getState().setReadOnly(activePath, false)}
+          >
+            {t('editor.readOnly')}
+          </button>
+        ) : null}
         <span className="mr-1 shrink-0 text-[11px] text-muted-foreground">
           {saveState === 'saving' ? (
             <span className="inline-flex items-center gap-1">
@@ -173,11 +186,12 @@ export function EditorPane() {
           </Button>
         </Hint>
 
-        <Hint label={t('common.save')}>
+        <Hint label={readOnly ? t('editor.readOnly') : t('common.save')}>
           <Button
             variant="ghost"
             size="icon-sm"
             aria-label={t('common.save')}
+            disabled={readOnly}
             onClick={() => {
               void save({ force: true }).catch((error) =>
                 toast.error(t('files.saveFailed', { message: error.message })),
@@ -236,7 +250,7 @@ export function EditorPane() {
                 className="mx-auto w-full pl-14 pr-8 pt-6"
                 style={{ maxWidth: 'var(--dbx-note-editor-width, 760px)' }}
               >
-                <MarkdownEditor key={activePath} path={activePath} />
+                <MarkdownEditor key={activePath} path={activePath} readOnly={readOnly} />
               </div>
             </div>
             {inlineOutline === 'right' ? (
@@ -255,6 +269,7 @@ export function EditorPane() {
               onChange={setContent}
               lineNumbers={editorSettings.showSourceLineNumbers}
               wrap={editorSettings.sourceWrap}
+              readOnly={readOnly}
             />
           </div>
         )}

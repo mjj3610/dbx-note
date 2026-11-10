@@ -392,11 +392,17 @@ export const useNotesStore = create<NotesState>((set, get) => ({
       set({ tabs: updateTab(get().tabs, activePath, { dirty: false }) })
       // 开了「自动上传」且当前是对象存储 / WebDAV / 自托管时，排队一次增量上传
       scheduleAutoSync()
-      // 「自动更新知识库」：保存后增量刷新本篇的索引条目，失败只记录、不影响保存
-      if (useSettingsStore.getState().fileView.autoUpdateKnowledgeBase) {
-        void rpc.kbUpsert(activePath).catch((error) => {
-          console.warn('[kb] 增量更新索引失败', error)
-        })
+      // 「自动更新知识库」：保存后增量重算本篇的向量分块（内容哈希未变时后端直接跳过）
+      const settings = useSettingsStore.getState()
+      if (settings.fileView.autoUpdateKnowledgeBase || settings.rag.autoVector) {
+        void rpc
+          .kbIndexFile(activePath, {
+            chunkSize: settings.rag.chunkSize,
+            chunkOverlap: settings.rag.chunkOverlap,
+          })
+          .catch((error) => {
+            console.warn('[kb] 增量更新向量失败', error)
+          })
       }
     } catch (error) {
       set({

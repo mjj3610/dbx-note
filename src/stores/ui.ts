@@ -59,6 +59,8 @@ interface UiState {
   fileClipboard: { mode: 'cut' | 'copy'; path: string } | null
   /** 文件树当前选中的节点，用于 F2 / Delete / Ctrl+X/C/V 快捷键 */
   selectedTreePath: string | null
+  /** 右键「只读打开」的笔记：在编辑器里只展示、不允许改动 */
+  readOnlyPaths: string[]
 
   setTab: (tab: SidebarTab) => void
   toggleLeft: () => void
@@ -81,6 +83,8 @@ interface UiState {
   closeSyncConflict: () => void
   setFileClipboard: (clip: { mode: 'cut' | 'copy'; path: string } | null) => void
   setSelectedTreePath: (path: string | null) => void
+  /** 切换某篇笔记的只读状态；路径从文件树移除时状态自然失效 */
+  setReadOnly: (path: string, value: boolean) => void
 }
 
 export const useUiStore = create<UiState>((set) => ({
@@ -101,6 +105,7 @@ export const useUiStore = create<UiState>((set) => ({
   syncConflict: null,
   fileClipboard: null,
   selectedTreePath: null,
+  readOnlyPaths: [],
 
   setTab: (tab) => set({ tab }),
   toggleLeft: () => set((state) => ({ leftVisible: !state.leftVisible })),
@@ -123,4 +128,12 @@ export const useUiStore = create<UiState>((set) => ({
   closeSyncConflict: () => set({ syncConflict: null }),
   setFileClipboard: (clip) => set({ fileClipboard: clip }),
   setSelectedTreePath: (path) => set({ selectedTreePath: path }),
+  setReadOnly: (path, value) =>
+    set((state) => ({
+      readOnlyPaths: value
+        ? state.readOnlyPaths.includes(path)
+          ? state.readOnlyPaths
+          : [...state.readOnlyPaths, path]
+        : state.readOnlyPaths.filter((item) => item !== path),
+    })),
 }))

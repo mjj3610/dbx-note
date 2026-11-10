@@ -7,8 +7,9 @@
  * - 知识库：自动更新、全部重新计算、上传 / 下载索引快照
  * - 导入：笔记、转 Markdown、Notion (.zip)
  *
- * 参考项目的知识库是向量数据库，本项目是本地优先 + 全文检索，因此等价映射为
- * 工作区 `.dbx-note/kb-index.json` 索引快照；「上传 / 下载知识库」即导出 / 导入该快照。
+ * 0.5.6 起知识库改用真正的向量库（分块 + embedding + BM25 混合检索），
+ * 「全部重新计算」重建向量，「上传 / 下载知识库」即导出 / 导入
+ * 工作区 `.dbx-note/rag-snapshot.json` 向量快照。
  */
 import { useState } from 'react'
 import {
@@ -121,9 +122,18 @@ export function FileMoreMenu() {
 
   const doReindex = () =>
     run(async () => {
-      const result = await rpc.kbReindex()
+      const rag = useSettingsStore.getState().rag
+      const result = await rpc.kbReindexAll({
+        chunkSize: rag.chunkSize,
+        chunkOverlap: rag.chunkOverlap,
+        topK: rag.topK,
+        threshold: rag.threshold,
+      })
       await refreshKb()
-      toast.success(t('files.more.reindexed', { count: result.count }))
+      toast.success(t('files.more.reindexed', { count: result.indexed }))
+      if (result.failed.length > 0) {
+        toast.error(t('files.ctx.actionFailed', { message: result.failed.join('; ') }))
+      }
     })
 
   const doUploadKb = () =>

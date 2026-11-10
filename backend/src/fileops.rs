@@ -5,11 +5,12 @@
 //! - 查看目录（`fs/reveal`，在系统文件管理器里选中）
 //! - 导入笔记 / 导入为 Markdown / 导入 Notion zip（`fs/import`，前端解包后批量写盘）
 //! - 从模板新建笔记（`fs/templates`）
-//! - 知识库索引状态 / 全量重建 / 单篇更新 / 导出 / 导入（`kb/*`）
-//!
-//! 参考项目的知识库是向量数据库；本项目是「本地优先 + 全文检索」，等价映射成
-//! 工作区 `.dbx-note/kb-index.json` 里的笔记索引快照（路径 / 标题 / 摘要 / 字数 / 时间）。
-//! 索引随工作区一起被云同步带走，所以「上传 / 下载知识库」落地为导出 / 导入这份快照。
+//! - 在新窗口打开（`fs/openExternal`，交给系统默认程序）
+//! - 旧版知识库索引快照（kb 系列 RPC，0.5.6 起由 `knowledge.rs` 的向量库接管）
+
+// 0.5.5 的 kb-index.json 实现保留为兼容回退参考；RPC 已全部指向 knowledge.rs 的向量库。
+// 这些函数暂不被调用，避免每次编译刷 dead_code 警告。
+#![allow(dead_code)]
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -254,6 +255,41 @@ pub fn reveal_entry(app: &App, params: &Value) -> RpcResult {
             .arg(&dir)
             .spawn()
             .map_err(|error| RpcError::internal(format!("打开目录失败：{error}")))?;
+    }
+    Ok(json!({ "ok": true, "path": files::relative_path(&root, &path) }))
+}
+
+/// `fs/openExternal`：在插件之外的独立窗口用系统默认程序打开笔记。
+///
+/// 参考项目是 Tauri 多 WebviewWindow；DBX 插件运行在宿主的单个 iframe 里，
+/// 无法再开一个插件窗口，因此等价映射为「系统默认程序打开该文件」，
+/// 用户拿到的仍是一个独立、可并排对照的新窗口。路径一律经 `safe_join` 校验。
+pub fn open_external(app: &App, params: &Value) -> RpcResult {
+    let root = root_of(app);
+    let rel = param_str(params, "path");
+    let path = files::safe_join(&root, &rel)?;
+    if !path.is_file() {
+        return Err(RpcError::invalid("只能打开文件，不能打开文件夹"));
+    }
+    let ok = {
+        #[cfg(windows)]
+        {
+            std::process::Command::new("cmd")
+                .args(["/C", "start", "", &path.to_string_lossy().replace('/', "\\")])
+                .spawn()
+                .is_ok()
+        }
+        #[cfg(target_os = "macos")]
+        {
+            std::process::Command::new("open").arg(&path).spawn().is_ok()
+        }
+        #[cfg(all(not(windows), not(target_os = "macos")))]
+        {
+            std::process::Command::new("xdg-open").arg(&path).spawn().is_ok()
+        }
+    };
+    if !ok {
+        return Err(RpcError::internal("无法用系统默认程序打开该文件"));
     }
     Ok(json!({ "ok": true, "path": files::relative_path(&root, &path) }))
 }

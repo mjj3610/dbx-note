@@ -1463,6 +1463,9 @@ const TEXT_MUTED: u32 = cref(0x52_525b);
 const BADGE_BG: u32 = cref(0xf4_f4f5);
 /// 选框 / 手柄的 primary 色
 const FRAME: u32 = cref(0x18_181b);
+/// 选区边框线颜色：红色（与标注调色板首个颜色 `#ef4444` 一致）。
+/// 只作用于框选阶段的边框与 8 个 resize 手柄描边；工具栏、角标仍用中性色。
+const SELECTION_BORDER: u32 = cref(0xef_4444);
 
 /* ---- 基础图元 ---- */
 
@@ -1870,8 +1873,9 @@ pub fn paint_bar(hdc: HDC, bar: &Bar, ink: &Ink, hot: Option<Action>) {
     }
 }
 
-/// 选区样式：`border border-primary` + 8 个手柄 + 尺寸角标
+/// 选区样式：红色 1px 边框 + 8 个手柄 + 尺寸角标
 ///
+/// 边框与手柄描边统一用 `SELECTION_BORDER`（红色），在浅色 / 深色壁纸上都更醒目；
 /// 手柄是 `size-3` 的白底方框压在边框上（四角 + 四边中点），与参考项目一致；
 /// 角标是 `Badge variant="secondary"`，贴着选区左上角外侧，上方放不下就落到选区内。
 pub fn paint_selection(
@@ -1890,7 +1894,7 @@ pub fn paint_selection(
             right: x + w,
             bottom: y + h,
         };
-        let brush = CreateSolidBrush(FRAME);
+        let brush = CreateSolidBrush(SELECTION_BORDER);
         FrameRect(hdc, &edge, brush);
         DeleteObject(brush as HGDIOBJ);
 
@@ -1915,7 +1919,7 @@ pub fn paint_selection(
                     bottom: hy - half + box_size,
                 };
                 fill_box(hdc, &area, CARD_BG);
-                let pen = CreatePen(0, 1, FRAME);
+                let pen = CreatePen(0, 1, SELECTION_BORDER);
                 let old_brush = SelectObject(hdc, GetStockObject(NULL_BRUSH) as HGDIOBJ);
                 let old_pen = SelectObject(hdc, pen as HGDIOBJ);
                 Rectangle(hdc, area.left, area.top, area.right, area.bottom);
@@ -2197,4 +2201,18 @@ fn to_rgba(bgra: &[u8]) -> Vec<u8> {
         pixel[3] = 255;
     }
     out
+}
+
+#[cfg(test)]
+mod selection_border_tests {
+    use super::*;
+
+    /// 用户反馈：全局截图框选阶段的边框线要改成红色，且不能误把工具栏 / 角标也染红
+    #[test]
+    fn selection_border_is_red_and_distinct_from_toolbar() {
+        assert_eq!(SELECTION_BORDER, cref(0xef_4444));
+        assert_ne!(SELECTION_BORDER, FRAME);
+        // GDI COLORREF 是 0x00BBGGRR：#ef4444 应存成 0x004444ef
+        assert_eq!(SELECTION_BORDER & 0x00ff_ffff, 0x0044_44ef);
+    }
 }
