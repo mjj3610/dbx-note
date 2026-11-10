@@ -159,7 +159,7 @@ DBX_NOTE_CHECK_DATA=.tmp/check-fresh npm run sidecar-check
 npm run mock-ai            # http://127.0.0.1:5199/v1
 
 # 测试
-npm run sidecar-check      # 后端协议 187 项断言（含截屏 / 桌面框选 / 像素自检 / 钉在顶层 / 系统 OCR / 剪贴板读写 / 全局热键 / 录音 / 画布 / 图片 / 识别 / 转写 / MCP / 同步通道 / 远端清单 / 另存为导出 / 远端提交历史 / 备份）
+npm run sidecar-check      # 后端协议 194 项断言（含截屏 / 桌面框选 / 像素自检 / 钉在顶层 / 系统 OCR / 剪贴板读写 / 全局热键 / 录音 / 画布 / 图片 / 识别 / 转写 / MCP / 同步通道 / 远端清单 / 另存为导出 / 远端提交历史 / 备份）
 npm run smoke              # 界面冒烟 12 项 + 截图
 node scripts/mock-mcp.mjs  # 假的 MCP 服务（e2e 与自检用，暴露 echo / now）
 npm run e2e                # 端到端 286 项（标签页 / 搜索 / AI 多厂商配置 / 选区 AI / 画布图形库与图表 / 手绘 / 截图工具与全局热键 / 图片设置面板 / 编辑器底栏 / 历史版本 / 对照 / 斜杠命令 / 标题折叠 / 公式示例 / 同步 / 备份 / 识别 / 语音 / MCP / 窄屏）

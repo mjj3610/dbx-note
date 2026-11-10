@@ -55,12 +55,14 @@ function check(name, condition, detail = '') {
  */
 function rmDirRobust(target) {
   if (!existsSync(target)) return
+  // 直接改名挪走：WorkBuddy 的 safe-delete shim 对含上千小文件的 .git 目录会先等
+  // genie-trash 超时再抛错，rmSync → catch 的老写法每轮都要白等几十秒。
+  const aside = join(ROOT, '.tmp', 'stale', `${basename(target)}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`)
+  mkdirSync(dirname(aside), { recursive: true })
   try {
-    rmSync(target, { recursive: true, force: true })
-  } catch {
-    const aside = join(ROOT, '.tmp', 'stale', `${basename(target)}-${Date.now()}`)
-    mkdirSync(dirname(aside), { recursive: true })
     renameSync(target, aside)
+  } catch {
+    rmSync(target, { recursive: true, force: true })
   }
 }
 
@@ -123,8 +125,12 @@ function seedWorkspace() {
   // 只清理 Markdown 文件，避免删除被宿主占用的目录
   mkdirSync(join(WORKSPACE, '项目'), { recursive: true })
   for (const dir of [WORKSPACE, join(WORKSPACE, '项目')]) {
+    const aside = join(ROOT, '.tmp', 'stale', `seed-${basename(dir)}-${Date.now()}`)
     for (const name of readdirSync(dir)) {
-      if (name.endsWith('.md')) unlinkSync(join(dir, name))
+      if (!name.endsWith('.md')) continue
+      // 不直接 unlink：批量删除保护会在 genie-trash 上超时；改名挪走后下面重新 seed 同名文件
+      mkdirSync(aside, { recursive: true })
+      renameSync(join(dir, name), join(aside, name))
     }
   }
   // 清掉上一轮的 Git 仓库与画布，保证「初始化仓库」「新建画布」每次都从零开始
@@ -241,7 +247,11 @@ for (let attempt = 0; attempt < 6 && (await tabList.getByRole('tab').count()) < 
   if ((await planNode.count()) === 0) await projectNode.first().click()
   await planNode.first().waitFor({ state: 'visible', timeout: 15_000 })
   await planNode.first().click()
-  await page.waitForTimeout(700)
+  // 编辑器内容会先切过去、标签元素可能晚一拍才挂载；固定 700ms 在冷启动 / 高负载下不够。
+  // 这里轮询等标签真正出现，否则后续重复点同一文件会被 open() 的 activePath 短路。
+  for (let tick = 0; tick < 20 && (await tabList.getByRole('tab').count()) < 2; tick += 1) {
+    await page.waitForTimeout(200)
+  }
 }
 await page.waitForTimeout(300)
 check('第二个文件追加标签', (await tabList.getByRole('tab').count()) === 2)
