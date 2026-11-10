@@ -41,6 +41,7 @@ import { SourceEditor } from './SourceEditor'
 export function EditorPane() {
   const t = useT()
   const activePath = useNotesStore((state) => state.activePath)
+  const tabs = useNotesStore((state) => state.tabs)
   const content = useNotesStore((state) => state.content)
   const setContent = useNotesStore((state) => state.setContent)
   const loadingFile = useNotesStore((state) => state.loadingFile)
@@ -100,19 +101,31 @@ export function EditorPane() {
   }, [])
 
   if (!activePath) {
+    // 标签栏必须常驻：关闭当前标签后异步接管邻居的那段时间里，tabs 仍非空，
+    // 不能把整棵编辑器子树（含标签栏）卸载掉，否则表现为「其他 tab 先消失再回来」。
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-3 bg-background px-6 text-center">
-        <div className="flex size-12 items-center justify-center rounded-xl bg-muted text-muted-foreground">
-          <FileText className="size-5" />
-        </div>
-        <div>
-          <p className="text-sm font-medium">{t('editor.noFile')}</p>
-          <p className="mt-1 text-xs text-muted-foreground">{t('editor.noFileHint')}</p>
-        </div>
-        <Button size="sm" variant="outline" onClick={() => setDirPickerOpen(true)}>
-          <FolderOpen className="size-3.5" />
-          {t('settings.workspace')}
-        </Button>
+      <div className="flex h-full min-h-0 flex-col bg-background">
+        <EditorTabBar />
+        {tabs.length > 0 ? (
+          // 正在读盘接管邻居笔记，用加载态占位而不是「没有打开文件」的空状态
+          <div className="flex min-h-0 flex-1 items-center justify-center" data-editor-switching="1">
+            <Spinner className="text-muted-foreground" />
+          </div>
+        ) : (
+          <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
+            <div className="flex size-12 items-center justify-center rounded-xl bg-muted text-muted-foreground">
+              <FileText className="size-5" />
+            </div>
+            <div>
+              <p className="text-sm font-medium">{t('editor.noFile')}</p>
+              <p className="mt-1 text-xs text-muted-foreground">{t('editor.noFileHint')}</p>
+            </div>
+            <Button size="sm" variant="outline" onClick={() => setDirPickerOpen(true)}>
+              <FolderOpen className="size-3.5" />
+              {t('settings.workspace')}
+            </Button>
+          </div>
+        )}
       </div>
     )
   }

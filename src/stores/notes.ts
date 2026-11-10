@@ -55,7 +55,8 @@ interface NotesState {
   loadTree: () => Promise<void>
   /** 只拉远端目录清单并合并进现有文件树，不重读本地磁盘 */
   refreshRemoteTree: (options?: { force?: boolean }) => Promise<void>
-  open: (path: string) => Promise<void>
+  /** `force` 用于「乐观接管」：activePath 已先切过去，仍要真正读一次盘 */
+  open: (path: string, options?: { force?: boolean }) => Promise<void>
   /**
    * 重新读当前文件（手动拉取 / 解决冲突后调用）
    *
@@ -136,6 +137,44 @@ function blankEditor() {
   return { activePath: '', title: '', content: '', savedContent: '', saveState: 'idle' as SaveState }
 }
 
+type NotesSetter = (partial: Partial<NotesState>) => void
+type NotesGetter = () => NotesState
+
+/**
+ * 乐观接管标签（关闭当前标签、关闭其它标签、删除文件后共用）
+ *
+ * 旧写法是 `set({ tabs, ...blankEditor() })` 再 `await open(next.path)`：
+ * 中间一段时间 `activePath === ''`，EditorPane 会卸载整棵编辑器子树（含标签栏），
+ * 表现为「其他 tab 先全部消失，过一会才回来」。
+ *
+ * 这里改成同一次 `set` 就把 `tabs` 与 `activePath` 一起切到邻居，再异步读盘：
+ * 标签栏始终挂载，正文区由 `loadingFile` 显示加载态。读盘失败时回退到空编辑器，
+ * 但保留剩余标签，用户仍能点其它 tab 重试。
+ */
+async function takeOverTab(
+  set: NotesSetter,
+  get: NotesGetter,
+  nextTabs: EditorTab[],
+  next: EditorTab,
+): Promise<void> {
+  set({
+    tabs: nextTabs,
+    activePath: next.path,
+    title: baseName(next.path),
+    content: '',
+    savedContent: '',
+    loadingFile: true,
+    saveState: 'idle',
+    lastError: null,
+  })
+  persistTabs(nextTabs, next.path)
+  try {
+    await get().open(next.path, { force: true })
+  } catch {
+    set({ ...blankEditor(), loadingFile: false })
+  }
+}
+
 /** 更新某个标签的字段，路径不存在时原样返回 */
 function updateTab(tabs: EditorTab[], path: string, patch: Partial<EditorTab>): EditorTab[] {
   return tabs.map((tab) => (tab.path === path ? { ...tab, ...patch } : tab))
@@ -211,10 +250,10 @@ export const useNotesStore = create<NotesState>((set, get) => ({
     }
   },
 
-  open: async (path) => {
+  open: async (path, options) => {
     if (!path) return
     const state = get()
-    if (state.activePath === path) return
+    if (state.activePath === path && !options?.force) return
     // 先落盘上一篇，再切换
     await flushPendingSave()
 
@@ -327,10 +366,10 @@ export const useNotesStore = create<NotesState>((set, get) => ({
     }
 
     const next = nextTabs[Math.min(activeIndex, nextTabs.length - 1)]
-    set({ tabs: nextTabs, ...blankEditor() })
     if (next) {
-      await get().open(next.path)
+      await takeOverTab(set, get, nextTabs, next)
     } else {
+      set({ tabs: nextTabs, ...blankEditor(), loadingFile: false })
       persistTabs([], '')
     }
   },
@@ -339,11 +378,10 @@ export const useNotesStore = create<NotesState>((set, get) => ({
     await flushPendingSave()
     const keep = get().tabs.find((tab) => tab.path === path)
     if (!keep) return
-    set({ tabs: [keep] })
     if (get().activePath !== path) {
-      set(blankEditor())
-      await get().open(path)
+      await takeOverTab(set, get, [keep], keep)
     } else {
+      set({ tabs: [keep] })
       persistTabs([keep], path)
     }
   },
@@ -454,8 +492,7 @@ export const useNotesStore = create<NotesState>((set, get) => ({
       if (activeRemoved) {
         const index = tabs.findIndex((tab) => tab.path === activePath)
         const next = nextTabs[index] ?? nextTabs[index - 1] ?? null
-        set(blankEditor())
-        if (next) await get().open(next.path)
+        if (next) await takeOverTab(set, get, nextTabs, next)
         else persistTabs([], '')
       }
     }

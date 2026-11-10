@@ -135,6 +135,21 @@ function seedWorkspace() {
   writeFileSync(join(WORKSPACE, '项目', '规划.md'), '# 规划\n\n- 记录\n- 整理\n')
   // 图片设置面板用例的载体：一张无尺寸的本地图
   writeFileSync(join(WORKSPACE, '图片笔记.md'), '# 图片笔记\n\n![示意图](assets/示意图.png)\n')
+  // 公式往返用例：模拟「远端同步下来、本地从未编辑过」的 .md 文件，
+  // 直接以原始 $...$ / $$...$$ 落盘，用来验证打开时不会被 Markdown 解析器吃掉
+  writeFileSync(
+    join(WORKSPACE, '公式往返.md'),
+    [
+      '# 公式往返',
+      '',
+      '行内：$E = mc^2$ 与 $\\frac{a}{b}$。',
+      '',
+      '$$',
+      '\\int_0^1 x^2 \\, dx = \\frac{1}{3}',
+      '$$',
+      '',
+    ].join('\n'),
+  )
   // 1x1 PNG：验证图片预览链路（Sidecar 读成 data URL 再交给 img）
   mkdirSync(join(WORKSPACE, 'assets'), { recursive: true })
   writeFileSync(join(WORKSPACE, 'assets', '示意图.png'), makePng(160, 120, [0x2f, 0x6f, 0xd8]))
@@ -241,6 +256,16 @@ for (let attempt = 0; attempt < 24; attempt += 1) {
 check('切换标签恢复上一篇正文', restoredText.includes('本周完成'))
 await page.screenshot({ path: join(SHOTS, '14-tabs.png') })
 await page.keyboard.press('Control+w')
+// 回归「关一个 tab 时其它 tab 先全部消失、过一会才回来」：
+// 在接管邻居的整段异步窗口里，标签栏必须一直挂载且不能闪出空状态。
+let tabFlicker = false
+for (let attempt = 0; attempt < 8; attempt += 1) {
+  const visibleTabs = await tabList.getByRole('tab').count()
+  const emptyState = await page.locator('text=选择一篇笔记开始编辑').count()
+  if (visibleTabs === 0 || emptyState > 0) tabFlicker = true
+  await page.waitForTimeout(60)
+}
+check('关闭标签过程中其它 tab 不闪退', !tabFlicker)
 // 关标签要写盘 + 重渲染，固定 800ms 在慢机器上不够；轮询到标签数稳定为 1
 let tabsAfterClose = 0
 for (let attempt = 0; attempt < 25; attempt += 1) {
@@ -959,6 +984,18 @@ check(
   !(await page.locator('.ProseMirror').innerText()).trimEnd().endsWith('/'),
 )
 
+// 参考项目的触发规则：/ 在块首或空白/标点之后即可，不要求整行为空。
+// 回归「列表项里已有正文时输入 / 带不出块编辑菜单」。
+await page.keyboard.press('Enter')
+await page.waitForTimeout(250)
+await page.keyboard.type('1. 计算均值（数学期望）： ')
+await page.waitForTimeout(450)
+await page.keyboard.type('/')
+await page.waitForTimeout(650)
+check('列表项正文后输入 / 也能唤起面板', (await page.locator('[data-slash-menu]').count()) === 1)
+await page.keyboard.press('Escape')
+await page.waitForTimeout(350)
+
 /* ---------- 颜色 / 块菜单 / 公式 / 图表 / 代码块语言 / 表格 ---------- */
 
 await page.keyboard.press('Enter')
@@ -1017,6 +1054,39 @@ check(
 )
 await page.keyboard.press('Escape')
 await page.waitForTimeout(500)
+
+// 回归「块前面的 + 鼠标移动时消失很快不好点击」：
+// Playwright 的 .click() 会瞬移到元素中心，测不出经过装订线时的 hover 断裂，
+// 这里按真实轨迹分步移动，再检查按钮仍可点击。
+const handlePathBox = await page
+  .locator('.ProseMirror p', { hasText: '颜色与块能力' })
+  .first()
+  .boundingBox()
+if (handlePathBox) {
+  const centerY = handlePathBox.y + handlePathBox.height / 2
+  await page.mouse.move(handlePathBox.x + 60, centerY)
+  await page.waitForTimeout(250)
+  for (let step = 1; step <= 10; step += 1) {
+    await page.mouse.move(handlePathBox.x + 60 - step * 8, centerY)
+    await page.waitForTimeout(45)
+  }
+  await page.waitForTimeout(200)
+  const addButton = page.getByRole('button', { name: '在下方插入块' })
+  check('鼠标穿过装订线后 + 仍可见', await addButton.isVisible())
+  const handlePointer = await page
+    .locator('[data-block-handle]')
+    .evaluate((node) => getComputedStyle(node).pointerEvents)
+    .catch(() => 'none')
+  check('鼠标穿过装订线后 + 未失去指针事件', handlePointer === 'auto', handlePointer)
+  const addBox = await addButton.boundingBox()
+  if (addBox) {
+    await page.mouse.click(addBox.x + addBox.width / 2, addBox.y + addBox.height / 2)
+    await page.waitForTimeout(950)
+    check('真实鼠标点击 + 能唤起块编辑菜单', (await page.locator('[data-slash-menu]').count()) === 1)
+    await page.keyboard.press('Escape')
+    await page.waitForTimeout(400)
+  }
+}
 
 // 焦点在块菜单按钮上，先点回正文末尾再继续
 const focusEnd = async () => {
@@ -1211,6 +1281,9 @@ for (let attempt = 0; attempt < 25; attempt += 1) {
   await page.waitForTimeout(400)
 }
 check('颜色写回 span/mark 属性', diskSource.includes('data-dbx-color'))
+// 公式必须原样写回 Markdown；以前 markdownTokenName 漏配导致 parse 时整段丢弃
+check('行内公式写回 $...$', /\$[^$\n]+\$/.test(diskSource))
+check('块级公式写回 $$ 围栏', /\$\$\s*\n[\s\S]*?\n\$\$/.test(diskSource))
 check('图表写回 mermaid 围栏', diskSource.includes('```mermaid'))
 check('代码块写回语言围栏', diskSource.includes('```python'))
 check(
@@ -1221,6 +1294,15 @@ check(
 await page.getByRole('button', { name: '可视化' }).click()
 await page.waitForTimeout(2500)
 check('源码往返后图表节点仍在', (await page.locator('.ProseMirror [data-mermaid-block]').count()) > 0)
+// 切回可视化会重新以 Markdown 解析一次；公式若被 tokenizer 丢掉，这里就查不到节点
+check(
+  '源码往返后行内公式仍在',
+  (await page.locator('.ProseMirror [data-math="inline"]').count()) > 0,
+)
+check(
+  '源码往返后块级公式仍在',
+  (await page.locator('.ProseMirror [data-math="block"]').count()) > 0,
+)
 
 /* ---------- 云同步（Git） ---------- */
 
@@ -2348,6 +2430,31 @@ check(
 await page.screenshot({ path: join(SHOTS, '18-mobile.png') })
 await page.setViewportSize({ width: 1440, height: 900 })
 await page.waitForTimeout(500)
+
+/* ---------- 公式：重新打开「同步下来」的笔记不丢公式 ---------- */
+
+// 关掉所有标签，模拟冷启动 / 同步后重新进入；`公式往返.md` 是启动时直接以
+// 原始 $...$ 与 $$...$$ 落盘的夹具，从未经过本编辑器写入。
+await page.keyboard.press('Control+Shift+W')
+await page.waitForTimeout(700)
+await page.locator('[data-tree-node="公式往返.md"]').first().click()
+for (let attempt = 0; attempt < 24; attempt += 1) {
+  if ((await page.locator('.ProseMirror [data-math="inline"]').count()) > 0) break
+  await page.waitForTimeout(250)
+}
+check(
+  '重新打开同步来的笔记含行内公式',
+  (await page.locator('.ProseMirror [data-math="inline"] math').count()) > 0,
+)
+check(
+  '重新打开同步来的笔记含块级公式',
+  (await page.locator('.ProseMirror [data-math="block"] math').count()) > 0,
+)
+const syncedMathSource = readFileSync(join(WORKSPACE, '公式往返.md'), 'utf8')
+check(
+  '重新打开后磁盘公式未被改写',
+  syncedMathSource.includes('$E = mc^2$') && syncedMathSource.includes('$$'),
+)
 
 if (badResponses.length > 0) console.log(`  失败资源：${JSON.stringify([...new Set(badResponses)])}`)
 check('控制台无错误', errors.length === 0, errors.slice(0, 3).join(' | '))

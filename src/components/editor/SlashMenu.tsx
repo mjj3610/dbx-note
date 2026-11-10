@@ -22,6 +22,18 @@ import { useNotesStore } from '@/stores/notes'
 const PANEL_WIDTH = 430
 const PANEL_HEIGHT = 300
 
+/**
+ * 斜杠触发规则（与参考项目 `findSlashMatch` 一致）
+ *
+ * `/` 位于块首、空白或中英文标点之后即可触发，不要求整段只有一个 `/`。
+ * 所以「1. 计算均值（数学期望）： /」这类已有正文的列表项也能带出面板；
+ * 而 `abc/`（紧跟字母）与 Markdown 链接地址里的 `/` 不会误触发。
+ * query 允许字母/数字/中文，但不含空格与第二个 `/`。
+ */
+const SLASH_TRIGGER_RE = /(?:^|[\s([{'"`<>]|[.,!?;:，。！？；：（）【】《》、])\/([^\s/]*)$/u
+/** Markdown 链接 / 图片的目标地址里不触发，避免和文件路径推荐冲突 */
+const LINK_TARGET_RE = /\[[^\]\n]+\]\([^)\n]*$/
+
 interface Anchor {
   top: number
   left: number
@@ -30,7 +42,7 @@ interface Anchor {
 /**
  * 斜杠命令面板
  *
- * 在空段落行首输入 `/` 打开：左栏分类、右栏命令，
+ * 在块首或空白/标点之后输入 `/` 打开：左栏分类、右栏命令，
  * `↑↓` 选项、`←→` 切分类、`Enter` 执行、`Esc` 关闭。
  * 选中 AI 类命令时面板切换为「输入指令」态。
  */
@@ -80,10 +92,12 @@ export function SlashMenu({ editor }: { editor: Editor | null }) {
     setBusy(false)
   }, [editor, range])
 
-  // 监听编辑器：光标在「行首以 / 开头的段落」里才显示
+  // 监听编辑器：光标前最近的 `/`（块首或空白/标点之后）即触发，与参考实现一致
   useEffect(() => {
     if (!editor) return
     const sync = () => {
+      // 只读模式与中文输入法组字期间保持现状，避免面板闪退
+      if (!editor.isEditable || editor.view.composing) return
       const { state } = editor
       const { $from } = state.selection
       if (!$from.parent.isTextblock) {
@@ -91,13 +105,20 @@ export function SlashMenu({ editor }: { editor: Editor | null }) {
         return
       }
       const textBefore = $from.parent.textBetween(0, $from.parentOffset, undefined, '\ufffc')
-      const match = /^\/([\p{L}\p{N}_-]*)$/u.exec(textBefore)
+      if (!textBefore || LINK_TARGET_RE.test(textBefore)) {
+        if (!fileModeRef.current) setOpen(false)
+        return
+      }
+      const match = SLASH_TRIGGER_RE.exec(textBefore)
       if (!match || busy) {
         // 文件面板已经脱离斜杠输入，删除 `/文件` 后不应被这里关掉
         if (!match && !fileModeRef.current) setOpen(false)
         return
       }
-      const from = $from.start() + 0
+      // 删除范围只覆盖 `/query`，不能把 `/` 前面的正文一起删掉
+      const fullMatch = match[0]
+      const slashOffset = textBefore.length - fullMatch.length + fullMatch.lastIndexOf('/')
+      const from = $from.start() + slashOffset
       const to = $from.pos
       const coords = editor.view.coordsAtPos($from.pos)
       const top = Math.min(coords.bottom + 6, window.innerHeight - PANEL_HEIGHT - 12)

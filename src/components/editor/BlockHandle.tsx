@@ -52,6 +52,18 @@ import {
 } from '@/lib/blockActions'
 import { useT } from '@/lib/useT'
 
+/**
+ * 鼠标离开正文到手柄的「过桥时间」
+ *
+ * 手柄渲染在 container 左侧装订线里（left: -46），鼠标从正文移向 `+` 时
+ * 会先短暂离开 container 的命中区域，触发 `mouseleave`。参考项目用几何过桥带
+ * + 状态锁处理，这里用「延迟隐藏 + 进入手柄即取消」达到同样效果：
+ * 延迟期间 info 仍在，按钮保持 pointer-events: auto，鼠标能真正落到按钮上。
+ */
+const HANDLE_HIDE_DELAY_MS = 280
+/** 手柄右侧的透明桥接带宽度（px），补齐手柄与正文之间的空隙 */
+const HANDLE_BRIDGE_WIDTH_PX = 6
+
 export function BlockHandle({
   editor,
   containerRef,
@@ -65,8 +77,27 @@ export function BlockHandle({
   const [open, setOpen] = useState(false)
   const activeRef = useRef<BlockInfo | null>(null)
   const openRef = useRef(false)
+  /** 延迟隐藏句柄；鼠标回到正文或手柄时取消 */
+  const hideTimerRef = useRef<number | null>(null)
 
   openRef.current = open
+
+  /** 取消待执行的隐藏，手柄保持可点击 */
+  const cancelHide = useCallback(() => {
+    if (hideTimerRef.current === null) return
+    window.clearTimeout(hideTimerRef.current)
+    hideTimerRef.current = null
+  }, [])
+
+  /** 延迟隐藏：给鼠标穿过装订线的时间，避免按钮瞬间消失 */
+  const scheduleHide = useCallback(() => {
+    cancelHide()
+    hideTimerRef.current = window.setTimeout(() => {
+      hideTimerRef.current = null
+      activeRef.current = null
+      setInfo(null)
+    }, HANDLE_HIDE_DELAY_MS)
+  }, [cancelHide])
 
   const locate = useCallback(
     (target: EventTarget | null) => {
@@ -94,12 +125,13 @@ export function BlockHandle({
     if (!container) return
     const onMove = (event: MouseEvent) => {
       if (openRef.current) return
+      // 鼠标仍在编辑器区域（含手柄）就取消待隐藏，保持按钮可点
+      cancelHide()
       locate(event.target)
     }
     const onLeave = () => {
       if (openRef.current) return
-      activeRef.current = null
-      setInfo(null)
+      scheduleHide()
     }
     container.addEventListener('mousemove', onMove)
     container.addEventListener('mouseleave', onLeave)
@@ -107,7 +139,10 @@ export function BlockHandle({
       container.removeEventListener('mousemove', onMove)
       container.removeEventListener('mouseleave', onLeave)
     }
-  }, [containerRef, locate])
+  }, [cancelHide, containerRef, locate, scheduleHide])
+
+  // 组件卸载时清掉定时器，避免对已卸载组件 setState
+  useEffect(() => () => cancelHide(), [cancelHide])
 
   if (editor.isDestroyed) return null
 
@@ -136,6 +171,8 @@ export function BlockHandle({
       data-block-handle
       aria-hidden={info ? undefined : true}
       className="absolute z-20 flex items-center gap-0.5 transition-opacity"
+      onMouseEnter={cancelHide}
+      onMouseLeave={scheduleHide}
       style={{
         top,
         // 手柄落在左侧预留的装订线里（EditorPane 给内容区留了 pl-14）
@@ -246,6 +283,13 @@ export function BlockHandle({
       >
         <Plus className="size-3.5" />
       </button>
+      {/* 透明桥接带：手柄右端到正文左边界之间不留命中空隙，鼠标移动途中不会触发隐藏 */}
+      <span
+        aria-hidden
+        data-block-handle-bridge
+        className="block h-6 shrink-0"
+        style={{ width: HANDLE_BRIDGE_WIDTH_PX }}
+      />
     </div>
   )
 }

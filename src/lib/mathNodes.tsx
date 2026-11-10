@@ -253,11 +253,16 @@ export const InlineMath = Node.create({
   addNodeView() {
     return ReactNodeViewRenderer(MathView)
   },
+  // MarkdownManager 用 markdownTokenName 作为 token→节点 的注册表 key，
+  // 必须与 tokenizer 的 type（inline_math）一致，否则 parseMarkdown 永远不会被调用，
+  // 公式 token 会被当成未知 token 静默丢弃（写盘后重开公式消失）。
+  markdownTokenName: 'inline_math',
   markdownTokenizer: inlineMathTokenizer,
-  parseMarkdown: (token, helpers) => ({
+  // atom 节点不能带 content，否则 ProseMirror schema 校验会报错；
+  // LaTeX 内容对 marked 不透明，不需要二次解析。
+  parseMarkdown: (token) => ({
     type: 'inlineMath',
-    attrs: { latex: token.content ?? '' },
-    content: helpers.parseInline(token.tokens || []) as never,
+    attrs: { latex: token.content ?? token.raw?.slice(1, -1) ?? '' },
   }),
   renderMarkdown: (node) => `$${String(node.attrs?.latex ?? '')}$`,
 })
@@ -286,10 +291,12 @@ export const BlockMath = Node.create({
   addNodeView() {
     return ReactNodeViewRenderer(MathView)
   },
+  // 与 mermaidNode 一致：块级节点前后各留一个换行，保证与相邻段落分隔
+  markdownTokenName: 'block_math',
   markdownTokenizer: blockMathTokenizer,
   parseMarkdown: (token) => ({
     type: 'blockMath',
-    attrs: { latex: token.content ?? '' },
+    attrs: { latex: token.content ?? token.raw?.replace(/^\$\$|\$\$$/g, '').trim() ?? '' },
   }),
-  renderMarkdown: (node) => `$$\n${String(node.attrs?.latex ?? '')}\n$$`,
+  renderMarkdown: (node) => `\n$$\n${String(node.attrs?.latex ?? '')}\n$$\n`,
 })
