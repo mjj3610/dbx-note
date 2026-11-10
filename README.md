@@ -342,7 +342,7 @@ SQLite 表：`settings`、`records`、`tags`、`record_tags`、`chats`、`messag
 | `npm run e2e` | 完整一轮 **316 通过 / 11 失败**；**v0.5.7 新增的 12 条断言全通过**（公式 Markdown 往返与冷启动重开、列表项内 `/` 触发、真实鼠标穿过装订线后 `+` 可点、关闭 tab 不闪退）。11 项均为既有的环境 / 时序敏感断言（Git 版本与仓库、同步平台表单、备份、全局热键、历史版本入口、MCP 试运行、AI 消息），与本版改动无关，详见 `docs/release-notes-v0.5.7.md`「回归」节 |
 | `node scripts/ui-probe-840.mjs` | 31 通过 / 0 失败（本版未重跑，历史结果） |
 | `cargo build --release` + 后端单元测试 | 构建通过（1 条既存 `dead_code` 警告）；**15 / 0** |
-| 产物 | v0.5.7 尚未发 Release；上一版由 GitHub Actions 的 5 平台矩阵在 `v0.5.6` tag 上构建。本版已把 `package-lock.json` 里 121 条 npmmirror 绝对地址换成 `registry.npmjs.org`，下次 CI 不再受 504 影响 |
+| 产物 | GitHub Actions 的 5 平台矩阵在 `v0.5.7` tag 上构建，CI run `42823213363` **一次通过**（121 条 npmmirror 地址已换成 `registry.npmjs.org`，不再出现 504）；Release https://github.com/mjj3610/dbx-note/releases/tag/v0.5.7 ，商店候选 https://github.com/t8y2/dbx-store/pull/498 等待维护者 `/sign` |
 
 截图链路除了功能断言，还有一条**像素级自检**：`screenshot/window` 返回的
 `pixels.inside` / `pixels.outside` 分别核对「选区内是否 1:1 原像素」「选区外是否压暗」，

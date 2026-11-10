@@ -232,21 +232,23 @@ v0.5.6 发布时 CI attempt 1 的 windows-x64 / darwin-x64 / darwin-arm64 三个
 
 ## 8. 发布链路
 
-**本版尚未发布**：用户本轮只要求实现与回归，未授权打 tag / 发 Release / 提候选。
-代码、版本号与文档已准备好，本地提交后等待确认。
+用户确认「直接发 v0.5.7」后已走完整发布链路：
 
-发布前只读核对结果：
-
-| 项 | 状态 |
+| 项 | 结果 |
 | --- | --- |
-| 商店 PR #493（v0.5.6） | **仍 open / merged=false**，`validate \| completed \| failure` 为「等签名」预期 |
-| 上游 `plugins/com.mjj3610.note.json` | `latestVersion = 0.5.4`（0.5.4 已签名上架，0.5.6 尚未合并） |
-| `v0.5.7` tag / Release | 不存在 |
-| 发布预检 | `preflight.mjs --dir .` 通过 |
+| 源码 | 自动 `note sync` 提交 + `4cabdda` 文档提交，经 Git Data API 推到远端 main `f8f2627`（`git push` 遇代理 schannel 断开） |
+| 关闭旧候选 | **#493（v0.5.6）已关闭**，守卫全过（open / 未合并 / 0 评论与审核 / 单文件 diff），留言 `pull/493#issuecomment-6768332082` |
+| tag / Release | https://github.com/mjj3610/dbx-note/releases/tag/v0.5.7 （published，非 draft / 非 prerelease，tag 对象指向远端 main `f8f2627`） |
+| CI run | https://github.com/mjj3610/dbx-note/actions/runs/42823213363 — **attempt 1 即 `completed / success`**，5 平台 + publish 全绿，6 个 assets |
+| 候选校验 | `make-store-candidate.mjs --validate` 唯一错误为预期 `com.mjj3610.note@0.5.7 awaiting DBX Store signing` |
+| 商店候选 PR | https://github.com/t8y2/dbx-store/pull/498 — open，分支 `add-com.mjj3610.note-0.5.7`，diff 仅 `candidates/com.mjj3610.note.json` +59 行 |
+| PR check-run | `validate \| completed \| failure`，唯一 failure 为等签名，其余都是 localization warning |
+| 5 平台指纹 | 见 `store-submission/PUBLISH.md`（全部取自 CI 生成的 `release-candidates.json`） |
 
-若发布 0.5.7，按商店「同一插件只保留一个 open candidate」规则，需先关闭或取代 #493，
-再走：推源码 → 打 `v0.5.7` tag / 发 Release → 等 5 平台 CI → 下载 `release-candidates.json`
-→ 生成并校验候选 JSON → 提新商店 PR → 核对 `validate` 预期失败 → 更新发布记录 → 等 `/sign`。
+发布前只读核对：#493 仍 open 且无维护者评论；上游 `latestVersion = 0.5.4`、无本插件
+open 候选；`v0.5.7` tag / Release 不存在；`preflight.mjs --dir .` 通过。
 
-> 0.5.6 的 CI attempt 1 曾因 `package-lock.json` 里 npmmirror 绝对地址 504 失败，
-> 本版已全部换成 `registry.npmjs.org`，下一次 5 平台构建应不再需要重跑失败 job。
+> 0.5.6 的 CI attempt 1 曾因 `package-lock.json` 里 npmmirror 绝对地址 504 导致三个平台失败、
+> 需要重跑；本版替换为 `registry.npmjs.org` 后 **一次通过**，隐患已消除。
+>
+> 当前只等维护者审核 #498 并评论 `/sign`；签名合并后把 `PUBLISH.md` 的「已上架版本」改为 0.5.7。

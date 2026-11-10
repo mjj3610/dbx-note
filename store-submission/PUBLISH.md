@@ -4,46 +4,50 @@
 
 | 项 | 值 |
 | --- | --- |
-| 已上架版本 | `com.mjj3610.note` **v0.5.4**（#487 已被维护者签名并合并；上游 `plugins/com.mjj3610.note.json` 的 source 已指向 `tree/v0.5.4`） |
-| 待签名候选 | **v0.5.6** → https://github.com/t8y2/dbx-store/pull/493 （open，分支 `add-com.mjj3610.note-0.5.6`，diff 仅 `candidates/com.mjj3610.note.json` +59 行） |
+| 已上架版本 | `com.mjj3610.note` **v0.5.4**（#487 已被维护者签名并合并；上游 `plugins/com.mjj3610.note.json` 的 source 仍指向 `tree/v0.5.4`） |
+| 待签名候选 | **v0.5.7** → https://github.com/t8y2/dbx-store/pull/498 （open，分支 `add-com.mjj3610.note-0.5.7`，diff 仅 `candidates/com.mjj3610.note.json` +59 行） |
 | 候选包 | 5 个平台，见下表 |
-| 源码 | https://github.com/mjj3610/dbx-note/tree/v0.5.6 |
-| Release | https://github.com/mjj3610/dbx-note/releases/tag/v0.5.6 （CI run 42753418479，attempt 2 completed / success，6 个 assets = 5 个 `.dbxp` + `release-candidates.json`） |
-| PR 校验 | #493 的 `validate` 为 failure 属**签名前预期**：唯一错误是 `Catalog contains 1 open candidate(s) awaiting DBX Store signing: com.mjj3610.note@0.5.6`；check-run 里其余都是 localization warning。维护者 `/sign` 后写入 `plugins/` 与 `catalog/` 即会通过 |
-| 旧 PR | #469（0.5.0）、#487（0.5.4）已签名合并；#484（0.5.2）、#486（0.5.3）、#490（0.5.5）复核后已关闭未合并。提 #493 前重新查过上游 open PR，**无本插件 open 候选** |
-| 待办 | 等维护者审核 #493 并评论 `/sign`；签名合并后把本表「已上架版本」改成 0.5.6 |
+| 源码 | https://github.com/mjj3610/dbx-note/tree/v0.5.7 |
+| Release | https://github.com/mjj3610/dbx-note/releases/tag/v0.5.7 （CI run **42823213363**，**attempt 1 即 completed / success**，6 个 assets = 5 个 `.dbxp` + `release-candidates.json`） |
+| PR 校验 | #498 的 `validate` 为 failure 属**签名前预期**：唯一错误是 `Catalog contains 1 open candidate(s) awaiting DBX Store signing: com.mjj3610.note@0.5.7`；check-run 里其余都是 localization warning。维护者 `/sign` 后写入 `plugins/` 与 `catalog/` 即会通过 |
+| 旧 PR | #469（0.5.0）、#487（0.5.4）已签名合并；#484（0.5.2）、#486（0.5.3）、#490（0.5.5）、#493（0.5.6）复核后已关闭未合并。关闭 #493 的守卫（open / 未合并 / 0 评论与审核 / 单文件 diff）全部通过；提 #498 前重新查过上游 open PR，**无本插件 open 候选** |
+| 待办 | 等维护者审核 #498 并评论 `/sign`；签名合并后把本表「已上架版本」改成 0.5.7 |
 
 候选包指纹（全部来自 CI 的 `release-candidates.json`，未签名）：
 
 | target | sha256 | size |
 | --- | --- | --- |
-| `windows-x64` | `7d6e00ef56c657d3c61103661a2690876b58610c33d0036c320a3ca69cae7871` | 3,904,043 |
-| `darwin-arm64` | `50e12a005c6eb6bd1e4d76b1a6c65916c24f54e2b7eb4de92f783ce854e734b0` | 3,696,470 |
-| `darwin-x64` | `377d4397be3340b9b85c72e7c01fd931bfabd892518407e921ecd85e621b9d4e` | 3,846,224 |
-| `linux-arm64` | `754cb1f02996ef2f7d6ee360863f336291d4582a59dc329fc52cfc6c714876df` | 3,773,117 |
-| `linux-x64` | `e0c1fb73b7385987b64f789b1b2ae76709864d0c3ab78f97fc68bc9113ee7dc3` | 3,845,021 |
+| `windows-x64` | `8b46ac5eabdac6cb068d0b966abb68f73bc67df2bb591e890e1f41655619b838` | 3,904,565 |
+| `darwin-arm64` | `f44a7cbf9b35ec24471ad58e148ff286718c3b1c9a00b30b0d175f7f76dca71f` | 3,696,672 |
+| `darwin-x64` | `f6e7d26f8637cbefb0e6fc4f5ba6432b35bc9a570425c48105e12e3c39e31af4` | 3,846,698 |
+| `linux-arm64` | `fe6b36d37a6bb2b021fd96bed77b55af0470cb50fb60c96a4b920af5c4e4fa9e` | 3,773,595 |
+| `linux-x64` | `bf5e067b88de57a50835f5be8eb8e6f66ac048c65d9c03638c7ba4d72bbc4da9` | 3,845,410 |
 
-（上一版 0.5.5 的指纹见 `git show 767fbe5:store-submission/PUBLISH.md`，其 PR #490 已关闭未合并；
+（上一版 0.5.6 的指纹见 `git show a91b986:store-submission/PUBLISH.md`，其 PR #493 已关闭未合并；
+0.5.5 的指纹见 `git show 767fbe5:store-submission/PUBLISH.md`，其 PR #490 已关闭未合并；
 0.5.4 的指纹见 `git show 6b99320:store-submission/PUBLISH.md`，其 PR #487 已签名合并；
 0.5.3 指纹见 `git show 2aac00e:store-submission/PUBLISH.md`，其 PR #486 已关闭未合并；
 0.5.2 指纹见 `git show 0cc03ef:store-submission/PUBLISH.md`。）
 
-### v0.5.7 开发中（尚未发 Release / 未提候选）
+### v0.5.7 发布要点
 
 - 用户四张截图反馈：数学公式同步上传后丢失且重开不显示；编辑器行内 `/` 带不出块编辑菜单；
   块前 `+` 移动过去就消失；关闭一个 tab 时其它 tab 先消失再回来。
 - 根因分别是：`mathNodes.tsx` 两个节点漏配 `markdownTokenName` 导致 Markdown 解析时公式
   token 被静默丢弃并被防抖保存写回覆盖云端；`SlashMenu.tsx` 行首正则过严；
   `BlockHandle.tsx` hover 区域断裂 + 零延迟隐藏；`notes.closeTabs()` 先置空 `activePath`
-  导致 `EditorPane` 卸载标签栏。详见 `docs/release-notes-v0.5.7.md`。
-- 版本已统一升到 `0.5.7`（manifest / package / Cargo.toml / `PLUGIN_VERSION` /
-  `.dbx-store.json`）。本版**不新增后端 RPC、不改表结构**。
+  导致 `EditorPane` 卸载标签栏。额外修复 `open()` 短路只看 `activePath` 的竞态。
+  详见 `docs/release-notes-v0.5.7.md`。
+- 版本统一升到 `0.5.7`；本版**不新增后端 RPC、不改表结构**。
 - 顺带修掉 0.5.6 CI 的 `registry.npmmirror.com` 504 隐患：`package-lock.json` 版本
-  `0.4.0 → 0.5.7`，121 条镜像绝对地址全部换成 `registry.npmjs.org`（490 条 `resolved` 已统一）。
-- **#493（v0.5.6）复核仍为 open / merged=false**，`validate | completed | failure` 仍是
-  「等签名」预期。若后续要发 0.5.7，按商店「同一插件只保留一个 open candidate」规则，
-  需先关闭或取代 #493。
-- 回归结果与发布动作待用户确认后再补；此期间不自动打 tag、不自动提 PR。
+  `0.4.0 → 0.5.7`，121 条镜像绝对地址全部换成 `registry.npmjs.org`。
+  **本版 CI run 42823213363 一次通过，5 平台 + publish 全绿，无需重跑失败 job。**
+- 用户明确授权「直接发 v0.5.7」：按商店规则先用 `.tmp/close-493.mjs` 关闭 0.5.6 未签名候选，
+  再打 tag / 发 Release / 等 CI / 生成候选 / 提 #498。
+- 发布前核对：#493 仍 open 且无维护者评论；上游 `latestVersion=0.5.4`、无本插件 open 候选；
+  `v0.5.7` tag 与 Release 不存在；`preflight.mjs --dir .` 通过。
+- `make-store-candidate.mjs --validate` 唯一错误为预期 `com.mjj3610.note@0.5.7 awaiting DBX Store signing`；
+  #498 的 check-run 同样是 `validate | completed | failure`。
 
 ### v0.5.6 发布要点
 
