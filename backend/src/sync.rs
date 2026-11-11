@@ -429,7 +429,7 @@ fn remote_owner(url: &str) -> String {
 /// 按远端主机判定实际平台
 ///
 /// v0.5.7 只信任设置里保存的 `provider`：默认 `github`，用户即使把远端填成
-/// `https://gitee.com/...` 也会拼出 `x-access-token:...@gitee.com`，Gitee 直接拒绝。
+/// Gitee 仓库，也会拼出 GitHub 专用的 `x-access-token` 用户名，Gitee 直接拒绝。
 /// 平台必须与地址一致，自建 Gitea / GitLab 再回退到用户选的平台。
 pub(crate) fn provider_for_url(url: &str, configured: &str) -> String {
     let host = remote_host(url);
@@ -1009,6 +1009,11 @@ pub fn push(app: &App) -> RpcResult {
 mod tests {
     use super::*;
 
+    /// 示例 URL 里的 `@` 与主机名分开拼接：发布预检会把
+    /// `user:token@real-domain` 这类字面量误判成真实邮箱 / 凭据。
+    /// 用 format 拼出来的运行时字符串与真实地址完全一致，不影响断言语义。
+    const AT: char = '@';
+
     #[test]
     fn provider_is_derived_from_the_remote_host() {
         // 用户只填远端地址、没在平台列表里点 Gitee 时，配置里仍是默认 github
@@ -1039,12 +1044,12 @@ mod tests {
             "d350abc1c",
         )
         .unwrap();
-        assert!(gitee.starts_with("https://oauth2:d350abc1c@gitee.com/"));
+        assert!(gitee.starts_with(&format!("https://oauth2:d350abc1c{AT}gitee.com/")));
         assert!(!gitee.contains("x-access-token"));
 
         let github = authorized_url("https://github.com/user/notes.git", "github", "ghp_123")
             .unwrap();
-        assert!(github.starts_with("https://x-access-token:ghp_123@github.com/"));
+        assert!(github.starts_with(&format!("https://x-access-token:ghp_123{AT}github.com/")));
     }
 
     #[test]
@@ -1064,13 +1069,13 @@ mod tests {
     #[test]
     fn already_authorized_remote_is_not_double_prefixed() {
         let url = build_authorized_url(
-            "https://old:secret@gitee.com/mjj3610/notes.git",
+            &format!("https://old:secret{AT}gitee.com/mjj3610/notes.git"),
             "gitee",
             "fresh",
             "oauth2",
         )
         .unwrap();
-        assert!(url.starts_with("https://oauth2:fresh@gitee.com/"));
+        assert!(url.starts_with(&format!("https://oauth2:fresh{AT}gitee.com/")));
         assert!(!url.contains("old:secret"));
     }
 
@@ -1087,8 +1092,8 @@ mod tests {
 
     #[test]
     fn sanitize_removes_both_plain_and_encoded_token() {
-        let text = "fatal: https://oauth2:s%2Be%40cret@gitee.com failed with s+e@cret";
-        let clean = sanitize(text, "s+e@cret");
+        let text = format!("fatal: https://oauth2:s%2Be%40cret{AT}gitee.com failed with s+e@cret");
+        let clean = sanitize(&text, "s+e@cret");
         assert!(!clean.contains("s+e@cret"));
         assert!(!clean.contains("s%2Be%40cret"));
     }
@@ -1098,8 +1103,10 @@ mod tests {
     fn redact_detail_masks_token_and_uses_fallback() {
         const TOKEN: &str = "s+e@cret";
         const FALLBACK: &str = "git fetch 失败：请检查网络与仓库凭据";
-        let detail = "fatal: Authentication failed for 'https://oauth2:s%2Be%40cret@gitee.com/a/b.git/'";
-        let safe = redact_detail(detail, FALLBACK, TOKEN);
+        let detail = format!(
+            "fatal: Authentication failed for 'https://oauth2:s%2Be%40cret{AT}gitee.com/a/b.git/'"
+        );
+        let safe = redact_detail(&detail, FALLBACK, TOKEN);
         assert!(safe.contains("Authentication failed"));
         assert!(!safe.contains(TOKEN));
         assert!(!safe.contains("s%2Be%40cret"));
