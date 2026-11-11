@@ -24,7 +24,8 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/menu'
 import { useT } from '@/lib/useT'
-import { scrollToHeading } from '@/lib/editorBus'
+import { revealChunk, scrollToHeading } from '@/lib/editorBus'
+import { REVEAL_CHUNK_EVENT } from '@/stores/graph'
 import { getLatestHeadings, publishMarkdownHeadings } from '@/lib/outlineStore'
 import { toggleSidePane } from '@/lib/split'
 import { useNotesStore } from '@/stores/notes'
@@ -110,6 +111,29 @@ export function EditorPane() {
     window.addEventListener('dbx-note:scroll-to-heading', handler)
     return () => window.removeEventListener('dbx-note:scroll-to-heading', handler)
   }, [])
+
+  // 图谱「打开原笔记」→ 在正文里定位知识块。MarkdownEditor 按 activePath 重建，
+  // 所以做有限次重试而不是固定延时；源码模式先切回可视化再重试。
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const needle = (event as CustomEvent<string>).detail
+      if (!needle) return
+      if (mode === 'source') {
+        setMode('visual')
+        const settings = useSettingsStore.getState()
+        void settings.patch({ editor: { ...settings.editor, viewMode: 'visual' } })
+      }
+      let attempts = 0
+      const attempt = () => {
+        if (revealChunk(needle)) return
+        attempts += 1
+        if (attempts < 15) window.setTimeout(attempt, 120)
+      }
+      window.setTimeout(attempt, 60)
+    }
+    window.addEventListener(REVEAL_CHUNK_EVENT, handler)
+    return () => window.removeEventListener(REVEAL_CHUNK_EVENT, handler)
+  }, [mode])
 
   if (!activePath) {
     // 标签栏必须常驻：关闭当前标签后异步接管邻居的那段时间里，tabs 仍非空，

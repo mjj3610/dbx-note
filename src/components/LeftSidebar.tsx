@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { FileText, FolderPlus, Highlighter, ListTree, Palette, Plus, RefreshCw, Search, X } from 'lucide-react'
+import { FileText, FolderPlus, Highlighter, ListTree, Network, Palette, Plus, RefreshCw, Search, X } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Hint } from '@/components/ui/tooltip'
@@ -15,6 +15,7 @@ import { FileTree } from './FileTree'
 import { RemoteTreeAlert } from './RemoteTreeAlert'
 import { RecordPanel } from './RecordPanel'
 import { CanvasPanel } from './canvas/CanvasPanel'
+import { GraphControlPanel } from './graph/GraphControlPanel'
 import { OutlinePanel } from './OutlinePanel'
 
 const TABS: Array<{ value: SidebarTab; icon: typeof FileText; labelKey: string }> = [
@@ -22,6 +23,7 @@ const TABS: Array<{ value: SidebarTab; icon: typeof FileText; labelKey: string }
   { value: 'records', icon: Highlighter, labelKey: 'nav.records' },
   { value: 'canvases', icon: Palette, labelKey: 'nav.canvases' },
   { value: 'outline', icon: ListTree, labelKey: 'nav.outline' },
+  { value: 'graph', icon: Network, labelKey: 'nav.graph' },
 ]
 
 /**
@@ -31,6 +33,7 @@ export function LeftSidebar() {
   const t = useT()
   const tab = useUiStore((state) => state.tab)
   const setTab = useUiStore((state) => state.setTab)
+  const setMobilePane = useUiStore((state) => state.setMobilePane)
   const startNewItem = useUiStore((state) => state.startNewItem)
 
   const [keyword, setKeyword] = useState('')
@@ -69,7 +72,11 @@ export function LeftSidebar() {
               <button
                 key={item.value}
                 type="button"
-                onClick={() => setTab(item.value)}
+                onClick={() => {
+                  setTab(item.value)
+                  // 窄屏下点「图谱」要回到主区视图，否则仍停在侧栏
+                  if (item.value === 'graph') setMobilePane('editor')
+                }}
                 // 窄侧栏会隐藏文字标签，这里保证无障碍名称与可测试性不丢
                 aria-label={t(item.labelKey)}
                 aria-current={active ? 'page' : undefined}
@@ -134,6 +141,7 @@ export function LeftSidebar() {
         </div>
       </div>
 
+      {tab !== 'graph' ? (
       <div className="shrink-0 px-2 py-2">
         <div className="relative">
           <Search className="pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-muted-foreground" />
@@ -160,6 +168,7 @@ export function LeftSidebar() {
           ) : null}
         </div>
       </div>
+      ) : null}
 
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         {/* 对齐参考项目 `unified-sync-status`：清单失败常驻提示，不受文件树空态影响 */}
@@ -169,6 +178,7 @@ export function LeftSidebar() {
           {tab === 'records' ? <RecordPanel /> : null}
           {tab === 'canvases' ? <CanvasPanel /> : null}
           {tab === 'outline' ? <OutlinePanel /> : null}
+          {tab === 'graph' ? <GraphControlPanel /> : null}
         </div>
       </div>
     </div>

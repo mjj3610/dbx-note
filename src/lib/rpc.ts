@@ -414,6 +414,67 @@ export interface RagFileFlags {
   included: boolean
 }
 
+/* ---------------- 0.5.9 知识图谱（向量库只读派生视图） ---------------- */
+
+/** 图谱节点：来源粒度一篇笔记一个点，知识块粒度一个 chunk 一个点 */
+export interface GraphNode {
+  id: string
+  kind: 'source' | 'chunk'
+  label: string
+  path: string
+  title: string
+  chunkId: number | null
+  /** 知识块正文摘要，用于右侧详情与「打开原笔记」后定位 */
+  excerpt: string
+  degree: number
+  chunkCount: number
+  isolated: boolean
+}
+
+/** 相似边 / 词法边 / 同文档相邻块结构边 */
+export interface GraphEdge {
+  source: string
+  target: string
+  score: number
+  kind: 'semantic' | 'lexical' | 'adjacent'
+}
+
+export interface GraphMeta {
+  computedAt: number
+  /** 后端按 count / max(updated_at) / included 生成的数据水印 */
+  watermark: string
+  dimension: number
+  model: string
+  configured: boolean
+  chunks: number
+  sources: number
+  /** 真向量走余弦；未配置 embedding 时降级为 BM25 词法相似 */
+  strategy: 'vector' | 'lexical'
+  granularity: 'source' | 'chunk'
+  threshold: number
+  topK: number
+  truncated: boolean
+  nodeCount: number
+  edgeCount: number
+  maxNodes: number
+  maxEdges: number
+}
+
+export interface GraphSnapshot {
+  nodes: GraphNode[]
+  edges: GraphEdge[]
+  meta: GraphMeta
+}
+
+export interface GraphOptions {
+  granularity?: 'source' | 'chunk'
+  threshold?: number
+  topK?: number
+  maxNodes?: number
+  maxEdges?: number
+  focus?: string
+}
+
 /** 复制 / 创建副本；duplicate=true 时自动生成「副本」名 */
 export function copyEntry(params: {
   from: string
@@ -457,38 +518,55 @@ export async function kbStatus(): Promise<RagStatus> {
   return { ...status, count: status.sources, updatedAt: status.lastIndexedAt }
 }
 
+/** 知识库写入成功后通知图谱等派生视图标脏（后端水印也会变化） */
+function notifyKbChanged(): void {
+  if (typeof window !== 'undefined') window.dispatchEvent(new Event('dbx:kb-reindexed'))
+}
+
 /** 全量重新计算向量（「全部重新计算」） */
-export function kbReindexAll(options: RagOptions = {}): Promise<RagIndexResult> {
-  return call('kb/reindexAll', options, 180_000)
+export async function kbReindexAll(options: RagOptions = {}): Promise<RagIndexResult> {
+  const result = await call<RagIndexResult>('kb/reindexAll', options, 180_000)
+  notifyKbChanged()
+  return result
 }
 
 /** 单篇笔记计算 / 更新向量 */
-export function kbIndexFile(path: string, options: RagOptions = {}): Promise<RagIndexResult> {
-  return call('kb/indexFile', { path, ...options }, 180_000)
+export async function kbIndexFile(path: string, options: RagOptions = {}): Promise<RagIndexResult> {
+  const result = await call<RagIndexResult>('kb/indexFile', { path, ...options }, 180_000)
+  notifyKbChanged()
+  return result
 }
 
 /** 整个文件夹批量计算向量 */
-export function kbIndexFolder(path: string, options: RagOptions = {}): Promise<RagIndexResult> {
-  return call('kb/indexFolder', { path, ...options }, 180_000)
+export async function kbIndexFolder(path: string, options: RagOptions = {}): Promise<RagIndexResult> {
+  const result = await call<RagIndexResult>('kb/indexFolder', { path, ...options }, 180_000)
+  notifyKbChanged()
+  return result
 }
 
 /** 删除某文件 / 文件夹下的向量 */
-export function kbDeleteVectors(path: string): Promise<{ deleted: number }> {
-  return call('kb/deleteVectors', { path }, WRITE_TIMEOUT)
+export async function kbDeleteVectors(path: string): Promise<{ deleted: number }> {
+  const result = await call<{ deleted: number }>('kb/deleteVectors', { path }, WRITE_TIMEOUT)
+  notifyKbChanged()
+  return result
 }
 
 /** 查询 / 设置单篇笔记的自动计算与包含开关；不传开关即为查询 */
-export function kbFlags(params: {
+export async function kbFlags(params: {
   path: string
   autoCalc?: boolean
   included?: boolean
 }): Promise<RagFileFlags> {
-  return call('kb/flags', params)
+  const result = await call<RagFileFlags>('kb/flags', params)
+  if (params.autoCalc !== undefined || params.included !== undefined) notifyKbChanged()
+  return result
 }
 
 /** 清空整个知识库索引（高危，UI 必须二次确认） */
-export function kbClearIndex(): Promise<{ cleared: number }> {
-  return call('kb/clear', {}, WRITE_TIMEOUT)
+export async function kbClearIndex(): Promise<{ cleared: number }> {
+  const result = await call<{ cleared: number }>('kb/clear', {}, WRITE_TIMEOUT)
+  notifyKbChanged()
+  return result
 }
 
 /** 向量 + BM25 混合检索 */
@@ -511,12 +589,26 @@ export function kbExportSnapshot(): Promise<{
 }
 
 /** 从快照恢复（不传 json 时读工作区快照文件） */
-export function kbImportSnapshot(params: { json?: string } = {}): Promise<{
+export async function kbImportSnapshot(params: { json?: string } = {}): Promise<{
   count: number
   vectorCount: number
   dimension: number
 }> {
-  return call('kb/snapshotImport', params, WRITE_TIMEOUT)
+  const result = await call<{ count: number; vectorCount: number; dimension: number }>(
+    'kb/snapshotImport', params, WRITE_TIMEOUT,
+  )
+  notifyKbChanged()
+  return result
+}
+
+/** 从向量库派生语义知识图谱（只读，不重新计算 embedding） */
+export function kbGraph(options: GraphOptions = {}): Promise<GraphSnapshot> {
+  return call('kb/graph', options, 60_000)
+}
+
+/** 以某个节点为中心「发现关联」，返回可合并进当前图谱的局部子图 */
+export function kbGraphNeighbors(params: GraphOptions & { nodeId: string }): Promise<GraphSnapshot> {
+  return call('kb/graph/neighbors', params, 60_000)
 }
 
 /** PDF 打印预览：Sidecar 写临时 HTML 并交给系统默认浏览器唤起打印窗口 */

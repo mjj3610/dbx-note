@@ -5,7 +5,8 @@
  */
 import { create } from 'zustand'
 
-export type SidebarTab = 'files' | 'records' | 'canvases' | 'outline'
+/** 'graph' 不占侧栏面板：选中后中间大区切换为知识图谱，侧栏只放控制器 */
+export type SidebarTab = 'files' | 'records' | 'canvases' | 'outline' | 'graph'
 /** 设置左栏的页签集合，与 NoteGen 的设置导航一一对应 */
 export type SettingsTab =
   | 'about'

@@ -7,6 +7,7 @@ import { ChatPanel } from '@/components/ChatPanel'
 import { MobileNav } from '@/components/MobileNav'
 import { CanvasEditor } from '@/components/canvas/CanvasEditor'
 import { EditorPane } from '@/components/EditorPane'
+import { GraphWorkspace } from '@/components/graph/GraphWorkspace'
 import { LeftSidebar } from '@/components/LeftSidebar'
 import { SidePane } from '@/components/SidePane'
 import { StatusBar } from '@/components/StatusBar'
@@ -82,6 +83,8 @@ export default function App() {
   const startNewItem = useUiStore((state) => state.startNewItem)
   const mobilePane = useUiStore((state) => state.mobilePane)
   const sidePane = useUiStore((state) => state.sidePane)
+  /** 图谱是中间大区的一种视图，不是侧栏面板 */
+  const graphMode = useUiStore((state) => state.tab === 'graph')
   const narrow = useIsNarrow()
   const canvasPath = useCanvasStore((state) => state.activePath)
   const theme = useSettingsStore((state) => state.theme)
@@ -349,6 +352,8 @@ export default function App() {
                   </div>
                 ) : mobilePane === 'chat' ? (
                   <ChatPanel />
+                ) : graphMode ? (
+                  <GraphWorkspace />
                 ) : canvasPath ? (
                   <CanvasEditor />
                 ) : (
@@ -369,7 +374,17 @@ export default function App() {
               ) : null}
 
               <Panel minSize={30} className="min-w-0">
-                {canvasPath ? <CanvasEditor /> : <EditorPane />}
+                {/*
+                 * 图谱与编辑器共用一个 Panel：编辑器始终挂载，只切显隐。
+                 * 若改成条件渲染，切回时 Tiptap / CodeMirror 会重建，丢掉
+                 * undo 栈、未保存内容、大纲标题索引与滚动位置。
+                 */}
+                <div className="relative h-full min-h-0">
+                  <div className={graphMode ? 'hidden' : 'h-full'} data-editor-keep-alive="1">
+                    {canvasPath ? <CanvasEditor /> : <EditorPane />}
+                  </div>
+                  {graphMode ? <GraphWorkspace /> : null}
+                </div>
               </Panel>
 
               {sidePane ? (

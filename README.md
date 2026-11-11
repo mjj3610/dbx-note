@@ -337,13 +337,14 @@ SQLite 表：`settings`、`records`、`tags`、`record_tags`、`chats`、`messag
 | 项目 | 结果 |
 | --- | --- |
 | `npm run typecheck` | 0 错误 |
-| `npm run sidecar-check` | **205 / 0**；v0.5.8 的 8 条同步诊断 + 3 条清单失败态断言全通过 |
-| `npm run smoke` | **25 / 0**，截图 5 张；其中 13 条为大纲回归（索引链路、H1~H6 层级识别、H1~H6 点击定位） |
-| `npm run e2e` | **337 通过 / 1 失败**；唯一失败为「全局截图有明确结局（完成或取消）」，属本机锁屏 / 远程会话导致截屏链路无结局的既有环境项，与本次大纲改动无关。清单失败态 3 条与 v0.5.8 既有 2 条界面断言全通过，详见 `docs/release-notes-v0.5.8.md`「回归」节 |
+| `npm run sidecar-check` | **214 / 0**；v0.5.9 新增 9 条知识图谱协议断言（结构 / 水印 / 缓存 / 块粒度 / 发现 / 阈值）全通过 |
+| `npm run smoke` | **34 / 0**，截图 5 张；其中 13 条为大纲回归、9 条为 v0.5.9 知识图谱界面断言（含编辑器 hidden 保活与切回后正文仍在） |
+| `npm run e2e` | **351 通过 / 1 失败**；唯一失败为「全局热键当场弹出标注工具栏」，属本机锁屏 / 远程会话无法注入全局热键的既有环境项。v0.5.9 新增 11 条图谱断言（工作区 / 控制器 / 详情区 / hidden 保活 / 参数控件 / 选中联动 / 发现关联 / 打开原笔记回到编辑器）全通过 |
 | `node scripts/ui-probe-840.mjs` | 31 通过 / 0 失败（本版未重跑，历史结果） |
-| 后端单元测试 | `cargo test --bin backend` **24 / 0**（含新增「清单失败文案脱敏」单测，以及 1 条真实 Git 仓库集成用例）；`cargo check` 通过（1 条既存 `dead_code` 警告） |
-| 本地产物说明 | 本机 `cargo build --release`（`lto = true`）已在 `backend/` 目录内增量重建成功（2m08s），并用它生成可安装的 `.dbxp`；本地协议 / 界面回归使用新编译的 debug Sidecar（`DBX_NOTE_BACKEND` 指向 `backend/target/debug/backend.exe`）；CI 的 5 平台矩阵仍负责正式发布产物 |
+| 后端单元测试 | `cargo test --bin backend` **27 / 0**（v0.5.9 新增 3 条图谱单测，另含 1 条真实 Git 仓库集成用例）；`cargo check` 通过（1 条既存 `dead_code` 警告） |
+| 本地产物说明 | v0.5.9 已在 `backend/` 目录内 `cargo build --release` 重建 release Sidecar（4m44s，4,471,296 B）并重新构建前端，生成可安装的 `.dbxp`；从**包内解出的** Sidecar 用 `DBX_NOTE_BACKEND` 跑 `sidecar-check` 得 **214 / 0**、握手版本 `0.5.9`；CI 的 5 平台矩阵仍只负责正式发布产物 |
 | 产物 | 本地安装包 `release/com.mjj3610.note-0.5.8-windows-x64.dbxp`（3,911,385 B，sha256 `7f2fe5922127d93162a1291d2063e9e167c438e0154c68fbb2e91994f124f716`）已包含大纲修复并重新校验（12/12 checksums、Sidecar 字节一致）。**v0.5.8 已发布**：Release https://github.com/mjj3610/dbx-note/releases/tag/v0.5.8 ，5 平台 CI run `42956095802` **attempt 1 全绿**，商店候选 https://github.com/t8y2/dbx-store/pull/501 等待维护者 `/sign`；上游已上架 v0.5.7（PR #498 已签名合并） |
+| v0.5.9（dev 分支） | 知识图谱已在 `dev` 分支完成 1~4 阶段实现与回归，版本号统一升到 `0.5.9`；本地安装包 `release/com.mjj3610.note-0.5.9-windows-x64.dbxp`（**3,946,626 B / sha256 `fbd55dffdfcfb84b44fc3c12963278b9b6459c580e4bc71d9bcf98db2bff2998`**），包校验 **14/0**、包内 Sidecar 协议自检 **214/0**。**未打 tag、未发 Release、未跑 5 平台 CI、未提商店候选 PR**；设计与发布边界见 `docs/知识图谱设计-v0.5.9.md` / `docs/release-notes-v0.5.9.md` / `docs/版本部署变更说明-v0.5.9.md` |
 
 截图链路除了功能断言，还有一条**像素级自检**：`screenshot/window` 返回的
 `pixels.inside` / `pixels.outside` 分别核对「选区内是否 1:1 原像素」「选区外是否压暗」，

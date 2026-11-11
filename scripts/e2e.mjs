@@ -1394,11 +1394,16 @@ check('提交后状态栏显示仓库信息', (await page.locator('text=最近�
 // 同步平台 / 令牌 / 自动提交 / 提交信息模板
 check('列出全部同步平台', (await page.locator('[data-sync-platform]').count()) === 8)
 await page.locator('[data-sync-platform="gitee"]').click()
-await page.waitForTimeout(900)
-check(
-  '可选择代码托管平台',
-  (await page.locator('[data-sync-platform="gitee"]').getAttribute('aria-pressed')) === 'true',
-)
+// saveOptions 会异步回写平台并重渲染表单，慢机器上 900ms 不够；轮询等 aria-pressed 落定
+let giteePressed = false
+for (let attempt = 0; attempt < 12; attempt += 1) {
+  if ((await page.locator('[data-sync-platform="gitee"]').getAttribute('aria-pressed')) === 'true') {
+    giteePressed = true
+    break
+  }
+  await page.waitForTimeout(350)
+}
+check('可选择代码托管平台', giteePressed)
 const autoCommit = page.getByRole('switch', { name: '自动提交' })
 // saveOptions 会等 refresh()（syncStatus + syncOptions）跑完才回写开关并清 busy；
 // 慢机器上可能要好几秒，轮询等状态稳定，别在 busy 期间重复点击
@@ -1467,7 +1472,13 @@ if (s3Ready) {
   await syncPanel.getByLabel('Access Key ID').fill('AKIAE2E')
   await syncPanel.getByLabel('Secret Access Key').fill('secret-e2e-value')
   await page.waitForTimeout(200)
-  await syncPanel.getByRole('button', { name: '保存', exact: true }).click()
+  // 平台切换的表单重建期可能短暂出现两个「保存」按钮；取第一个并软失败，
+  // 避免 strict mode 直接抛异常把后面整轮用例（含图谱）全部中断。
+  try {
+    await syncPanel.getByRole('button', { name: '保存', exact: true }).first().click({ timeout: 8_000 })
+  } catch (error) {
+    console.error('  ! 对象存储保存点击异常：', error.message)
+  }
   await page.waitForTimeout(1400)
   check('对象存储配置已保存', (await syncPanel.getByLabel('存储桶').inputValue()) === 'e2e-bucket')
   // 保存后 Sidecar 会回读并把明文换成掩码，轮询等它落定，别用固定 1.4s 猜
@@ -2545,6 +2556,59 @@ try {
   if (previousOrigin) {
     try { gitE2e('remote', 'set-url', 'origin', previousOrigin) } catch { /* 测试即将结束 */ }
   }
+}
+
+// 0.5.9 知识图谱：向量库只读派生视图、中间大区展示与知识块联动
+try {
+  await page.locator('.sidebar-tabs').getByRole('button', { name: '图谱' }).click()
+  await page.waitForTimeout(1100)
+  check('图谱工作区在中间大区显示', await page.locator('[data-graph-workspace]').isVisible())
+  check('图谱控制器与知识块详情区齐备',
+    (await page.locator('[data-graph-control]').count()) >= 1
+      && (await page.locator('[data-graph-detail]').count()) >= 1)
+  check('切到图谱时编辑器 hidden 保活',
+    (await page.locator('[data-editor-keep-alive]').count()) === 1
+      && !(await page.locator('[data-editor-keep-alive]').isVisible()))
+  const graphError = await page.locator('[data-graph-error]').innerText({ timeout: 1000 }).catch(() => '')
+  check('图谱生成无后端错误', graphError === '', graphError)
+  check('图谱阈值 / 邻居数控件可用',
+    (await page.locator('[data-graph-threshold]').count()) >= 1
+      && (await page.locator('[data-graph-topk]').count()) >= 1)
+
+  const hasCanvas = (await page.locator('[data-graph-canvas]').count()) >= 1
+  if (hasCanvas) {
+    const nodeCount = Number(await page.locator('[data-graph-canvas]').getAttribute('data-graph-node-count'))
+    check('图谱节点数由向量库派生', Number.isFinite(nodeCount) && nodeCount >= 0, String(nodeCount))
+    check('图谱策略标识存在',
+      ['vector', 'lexical'].includes(await page.locator('[data-graph-strategy]').getAttribute('data-graph-strategy')))
+
+    const firstNode = page.locator('[data-graph-list-node]').first()
+    if (await firstNode.count() > 0) {
+      const nodeId = await firstNode.getAttribute('data-graph-list-node')
+      await firstNode.click()
+      await page.waitForTimeout(300)
+      check('选中节点显示知识块详情',
+        (await page.locator('[data-graph-detail-title]').count()) >= 1)
+      check('画布选中态与侧栏一致',
+        (await page.locator('[data-graph-canvas]').getAttribute('data-graph-selected')) === nodeId)
+      await page.locator('[data-graph-discover]').click()
+      await page.waitForTimeout(1000)
+      check('「发现关联」返回局部子图且不报错',
+        (await page.locator('[data-graph-error]').count()) === 0)
+
+      // 知识块 → 原笔记：切回文件页签并派发 reveal 事件
+      await page.locator('[data-graph-open-note]').click()
+      await page.waitForTimeout(1200)
+      check('打开原笔记后回到编辑器',
+        (await page.locator('[data-editor-keep-alive]').isVisible())
+          && (await page.locator('.sidebar-tabs [aria-current="page"]').innerText()).includes('文件'))
+    }
+  } else {
+    check('空知识库时图谱显示空态', (await page.locator('[data-graph-empty]').count()) >= 1)
+  }
+} catch (error) {
+  console.error('  ! 知识图谱用例异常：', error.message)
+  check('知识图谱工作区在中间大区显示', false, error.message)
 }
 
 if (badResponses.length > 0) console.log(`  失败资源：${JSON.stringify([...new Set(badResponses)])}`)

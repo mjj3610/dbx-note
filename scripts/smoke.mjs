@@ -139,6 +139,35 @@ for (const [level, label, tag] of [
 }
 check('编辑器底栏可见', await page.locator('[data-editor-footer]').isVisible())
 
+// 0.5.9 知识图谱：点第 5 个页签后图谱占中间大区，编辑器只 hidden 不卸载
+await page.locator('.sidebar-tabs').getByRole('button', { name: '图谱' }).click()
+await page.waitForTimeout(900)
+check('图谱页签切换到中间大区', await page.locator('[data-graph-workspace]').isVisible())
+check('图谱侧栏控制器可见', await page.locator('[data-graph-control]').isVisible())
+check('图谱知识块详情区常驻', await page.locator('[data-graph-detail]').isVisible())
+check('图谱画布或空态已渲染',
+  (await page.locator('[data-graph-canvas]').count()) + (await page.locator('[data-graph-empty]').count()) >= 1)
+check('切换图谱时编辑器保持挂载',
+  (await page.locator('[data-editor-keep-alive]').count()) === 1
+    && (await page.locator('[data-editor-keep-alive] .ProseMirror').count()) >= 1)
+check('图谱粒度切换可用',
+  (await page.locator('[data-graph-granularity="source"]').count()) === 1
+    && (await page.locator('[data-graph-granularity="chunk"]').count()) === 1)
+await page.locator('[data-graph-granularity="chunk"]').click()
+await page.waitForTimeout(500)
+check('图谱切到知识块粒度后仍正常',
+  (await page.locator('[data-graph-granularity="chunk"]').getAttribute('aria-pressed')) === 'true')
+await page.locator('[data-graph-granularity="source"]').click()
+await page.waitForTimeout(400)
+await page.locator('[data-graph-refresh]').click()
+await page.waitForTimeout(600)
+check('图谱手动刷新不报错', (await page.locator('[data-graph-error]').count()) === 0)
+await page.locator('.sidebar-tabs').getByRole('button', { name: '文件' }).click()
+await page.waitForTimeout(500)
+check('切回文件页签后编辑器内容仍在',
+  await page.locator('.ProseMirror').isVisible()
+    && (await page.locator('.ProseMirror').innerText()).includes('冒烟测试内容'))
+
 // 设置
 await page.getByRole('button', { name: '设置' }).click()
 await page.waitForTimeout(600)

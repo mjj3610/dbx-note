@@ -464,6 +464,55 @@ async function main() {
     Array.isArray(ragSearch.items) && typeof ragSearch.context === 'string'
       && Array.isArray(ragSearch.sources),
     JSON.stringify(ragSearch).slice(0, 300))
+  // 0.5.9 知识图谱：向量库只读派生视图，不重新计算 embedding
+  const graph = await call('kb/graph')
+  check('知识图谱返回节点 / 边 / 元信息',
+    Array.isArray(graph.nodes) && Array.isArray(graph.edges)
+      && typeof graph.meta === 'object' && graph.meta !== null,
+    JSON.stringify(graph).slice(0, 300))
+  check('知识图谱元信息带水印与策略',
+    typeof graph.meta.watermark === 'string' && graph.meta.watermark.length > 0
+      && ['vector', 'lexical'].includes(graph.meta.strategy)
+      && typeof graph.meta.computedAt === 'number',
+    JSON.stringify(graph.meta))
+  const graphIds = new Set(graph.nodes.map((node) => node.id))
+  check('知识图谱节点字段完整',
+    graph.nodes.every((node) => typeof node.id === 'string'
+      && typeof node.label === 'string' && typeof node.path === 'string'
+      && typeof node.excerpt === 'string' && typeof node.degree === 'number'),
+    JSON.stringify(graph.nodes[0] ?? {}))
+  check('知识图谱边两端都在节点集合内',
+    graph.edges.every((edge) => graphIds.has(edge.source) && graphIds.has(edge.target)
+      && ['semantic', 'lexical', 'adjacent'].includes(edge.kind)),
+    JSON.stringify(graph.edges.slice(0, 2)))
+  const graphAgain = await call('kb/graph')
+  check('知识图谱按水印缓存命中',
+    graphAgain.meta.computedAt === graph.meta.computedAt
+      && graphAgain.meta.watermark === graph.meta.watermark)
+  const chunkGraph = await call('kb/graph', { granularity: 'chunk' })
+  check('知识图谱支持知识块粒度',
+    Array.isArray(chunkGraph.nodes) && chunkGraph.meta.granularity === 'chunk'
+      && chunkGraph.nodes.every((node) => node.kind === 'chunk'),
+    JSON.stringify(chunkGraph.meta))
+  if (graph.nodes.length > 0) {
+    const neighbors = await call('kb/graph/neighbors', { nodeId: graph.nodes[0].id })
+    check('知识图谱「发现关联」返回局部子图',
+      Array.isArray(neighbors.nodes) && Array.isArray(neighbors.edges)
+        && neighbors.nodes.some((node) => node.id === graph.nodes[0].id),
+      JSON.stringify(neighbors.meta ?? {}).slice(0, 200))
+  }
+  let graphNeighborBlocked = false
+  try {
+    await call('kb/graph/neighbors', {})
+  } catch {
+    graphNeighborBlocked = true
+  }
+  check('知识图谱发现接口校验 nodeId', graphNeighborBlocked)
+  const strictGraph = await call('kb/graph', { threshold: 1.0 })
+  check('知识图谱阈值可收敛边数量',
+    strictGraph.edges.length <= graph.edges.length,
+    `${strictGraph.edges.length} vs ${graph.edges.length}`)
+
   const snapshot = await call('kb/snapshotExport')
   check('上传知识库导出合法快照', JSON.parse(snapshot.json).sources.length >= 3)
   const restored = await call('kb/snapshotImport', { json: snapshot.json })

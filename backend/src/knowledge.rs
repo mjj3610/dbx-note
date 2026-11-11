@@ -10,6 +10,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
 use rusqlite::{params, Connection, OptionalExtension};
@@ -1429,6 +1430,514 @@ pub fn legacy_import(app: &App, params: &Value) -> RpcResult {
     Ok(json!({ "count": result.get("count").and_then(Value::as_i64).unwrap_or(0) }))
 }
 
+/* ---------------- 知识图谱：向量库的只读派生视图 ---------------- */
+// 设计要点：
+// 1. 不重新调用 embedding、不写表、不扫 Markdown 链接；图谱完全由
+//    vector_documents.embedding + knowledge_sources 派生，未配置 embedding 时
+//    降级为 BM25 词法相似，保证 lexical-only 知识库也能出图。
+// 2. 节点 / 边有硬上限；超过 GRAPH_EXACT_LIMIT 时用词法倒排取候选，
+//    避免 O(N²·dim) 在大库上失控。
+// 3. 只把节点 / 边（约 100~200KB）经 JSON-RPC 传给前端，embedding 绝不离开 Sidecar。
+// 4. 快照按数据指纹缓存；指纹包含 count / max(updated_at) / included 之和，
+//    可覆盖 reindex、flags、deleteVectors、snapshotImport 等所有改数据的入口。
+
+/// 每个节点最多保留几个邻居（相对 top-k，避免绝对阈值在不同 embedding 模型下炸图 / 空图）
+const GRAPH_TOP_K: usize = 4;
+/// 超过这个节点数启用词法候选剪枝
+const GRAPH_EXACT_LIMIT: usize = 900;
+/// 剪枝时每个节点最多取多少候选
+const GRAPH_CANDIDATES: usize = 48;
+/// 单张图的节点 / 边上限
+const GRAPH_MAX_NODES: usize = 300;
+const GRAPH_MAX_EDGES: usize = 600;
+/// 节点携带的知识块正文摘要长度（右侧详情直接复用，避免再发一次 RPC）
+const GRAPH_EXCERPT_CHARS: usize = 600;
+
+#[derive(Clone)]
+struct GraphNode {
+    id: String,
+    kind: &'static str,
+    label: String,
+    path: String,
+    title: String,
+    chunk_id: Option<i64>,
+    excerpt: String,
+    vector: Vec<f64>,
+    terms: Vec<String>,
+    chunk_count: usize,
+}
+
+struct GraphOptions {
+    granularity: String,
+    threshold: f64,
+    top_k: usize,
+    max_nodes: usize,
+    max_edges: usize,
+    focus: Option<String>,
+}
+
+fn graph_options(params: &Value) -> GraphOptions {
+    let requested = param_str(params, "granularity");
+    let granularity = match requested.as_str() {
+        "chunk" => "chunk",
+        _ => "source",
+    }
+    .to_string();
+    let number = |key: &str, default: usize, min: usize, max: usize| -> usize {
+        params
+            .get(key)
+            .and_then(Value::as_u64)
+            .unwrap_or(default as u64)
+            .clamp(min as u64, max as u64) as usize
+    };
+    let focus_raw = param_str(params, "focus");
+    let focus = focus_raw.trim();
+    GraphOptions {
+        granularity,
+        threshold: params
+            .get("threshold")
+            .and_then(Value::as_f64)
+            .unwrap_or(0.35)
+            .clamp(0.0, 1.0),
+        top_k: number("topK", GRAPH_TOP_K, 1, 12),
+        max_nodes: number("maxNodes", GRAPH_MAX_NODES, 20, GRAPH_MAX_NODES),
+        max_edges: number("maxEdges", GRAPH_MAX_EDGES, 20, GRAPH_MAX_EDGES),
+        focus: if focus.is_empty() { None } else { Some(focus.to_string()) },
+    }
+}
+
+/// 摘要压成单行并截断，避免一个知识块把图谱 JSON 撑大
+fn graph_excerpt(text: &str) -> String {
+    let mut out = String::new();
+    let mut count = 0usize;
+    for ch in text.chars() {
+        if count >= GRAPH_EXCERPT_CHARS {
+            break;
+        }
+        let ch = if ch.is_whitespace() { ' ' } else { ch };
+        if ch == ' ' && out.ends_with(' ') {
+            continue;
+        }
+        out.push(ch);
+        count += 1;
+    }
+    out.trim().to_string()
+}
+
+fn graph_base_name(path: &str) -> String {
+    Path::new(path)
+        .file_stem()
+        .map(|value| value.to_string_lossy().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "未命名笔记".to_string())
+}
+
+/// 数据水印：任何写向量库 / 改包含开关的动作都会让它变化
+fn graph_fingerprint(app: &App) -> Result<String, RpcError> {
+    with_db(app, |conn| {
+        let (chunks, chunk_stamp): (i64, i64) = conn.query_row(
+            "SELECT COUNT(*), COALESCE(MAX(updated_at), 0) FROM vector_documents",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        let (sources, source_stamp, included): (i64, i64, i64) = conn.query_row(
+            "SELECT COUNT(*), COALESCE(MAX(updated_at), 0), COALESCE(SUM(included), 0)
+             FROM knowledge_sources",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )?;
+        let dimension = get_meta(conn, "embeddingDimension").unwrap_or_default();
+        let stamp = get_meta(conn, "lastIndexedAt").unwrap_or_default();
+        Ok(format!(
+            "{chunks}/{chunk_stamp}/{sources}/{source_stamp}/{included}/{dimension}/{stamp}"
+        ))
+    })
+}
+
+struct GraphCacheEntry {
+    key: String,
+    payload: Value,
+}
+
+/// 只缓存最近一次快照：插件 Sidecar 单进程单工作区足够，且不用给 App 加锁字段
+fn graph_cache() -> &'static Mutex<Option<GraphCacheEntry>> {
+    static CACHE: OnceLock<Mutex<Option<GraphCacheEntry>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(None))
+}
+
+/// 把分块组装成节点：source 粒度做向量均值池化，chunk 粒度一节点一块
+fn graph_nodes(chunks: &[ChunkRow], granularity: &str, dimension: usize) -> Vec<GraphNode> {
+    let mut nodes: Vec<GraphNode> = Vec::new();
+    if granularity == "chunk" {
+        for chunk in chunks {
+            let label = if chunk.title.is_empty() {
+                graph_base_name(&chunk.path)
+            } else {
+                chunk.title.clone()
+            };
+            let vector = if dimension > 0 && chunk.embedding.len() == dimension {
+                chunk.embedding.clone()
+            } else {
+                Vec::new()
+            };
+            let text: String = chunk.content.chars().take(4000).collect();
+            nodes.push(GraphNode {
+                id: format!("chunk:{}:{}", chunk.filename, chunk.chunk_id),
+                kind: "chunk",
+                label: format!("{} · #{}", label, chunk.chunk_id + 1),
+                path: chunk.path.clone(),
+                title: label,
+                chunk_id: Some(chunk.chunk_id),
+                excerpt: graph_excerpt(&chunk.content),
+                vector,
+                terms: lexical_terms(&text),
+                chunk_count: 1,
+            });
+        }
+        return nodes;
+    }
+
+    let mut index: HashMap<String, usize> = HashMap::new();
+    let mut groups: Vec<Vec<usize>> = Vec::new();
+    for (position, chunk) in chunks.iter().enumerate() {
+        let slot = match index.get(&chunk.filename) {
+            Some(value) => *value,
+            None => {
+                let next = groups.len();
+                groups.push(Vec::new());
+                index.insert(chunk.filename.clone(), next);
+                next
+            }
+        };
+        groups[slot].push(position);
+    }
+    for group in groups {
+        let first = &chunks[group[0]];
+        let label = if first.title.is_empty() {
+            graph_base_name(&first.path)
+        } else {
+            first.title.clone()
+        };
+        let mut vector = vec![0.0f64; dimension];
+        let mut counted = 0usize;
+        if dimension > 0 {
+            for &position in &group {
+                if chunks[position].embedding.len() == dimension {
+                    for (offset, value) in chunks[position].embedding.iter().enumerate() {
+                        vector[offset] += value;
+                    }
+                    counted += 1;
+                }
+            }
+            if counted == 0 {
+                vector.clear();
+            } else {
+                for value in &mut vector {
+                    *value /= counted as f64;
+                }
+            }
+        } else {
+            vector.clear();
+        }
+        let joined: String = group
+            .iter()
+            .flat_map(|&position| chunks[position].content.chars())
+            .take(4000)
+            .collect();
+        nodes.push(GraphNode {
+            id: format!("source:{}", first.filename),
+            kind: "source",
+            label: label.clone(),
+            path: first.path.clone(),
+            title: label,
+            chunk_id: None,
+            excerpt: graph_excerpt(&chunks[group[0]].content),
+            vector,
+            terms: lexical_terms(&joined),
+            chunk_count: group.len(),
+        });
+    }
+    nodes
+}
+
+/// 打分上下文：有真向量走余弦，否则用对称 BM25
+struct GraphScoreContext {
+    vector_ready: bool,
+    avg_len: f64,
+    docs: usize,
+    df: HashMap<String, usize>,
+}
+
+impl GraphScoreContext {
+    fn build(nodes: &[GraphNode], vector_ready: bool) -> Self {
+        let mut df: HashMap<String, usize> = HashMap::new();
+        let mut total = 0usize;
+        for node in nodes {
+            total += node.terms.len();
+            let unique: HashSet<&String> = node.terms.iter().collect();
+            for term in unique {
+                *df.entry(term.clone()).or_insert(0) += 1;
+            }
+        }
+        Self {
+            vector_ready,
+            avg_len: total as f64 / nodes.len().max(1) as f64,
+            docs: nodes.len(),
+            df,
+        }
+    }
+
+    fn score(&self, left: &GraphNode, right: &GraphNode) -> f64 {
+        if self.vector_ready {
+            return cosine(&left.vector, &right.vector).max(0.0);
+        }
+        let lookup = |term: &str| -> usize { *self.df.get(term).unwrap_or(&0) };
+        let forward = bm25_score(&left.terms, &right.terms, self.avg_len, self.docs, &lookup);
+        let backward = bm25_score(&right.terms, &left.terms, self.avg_len, self.docs, &lookup);
+        (forward + backward) / 2.0
+    }
+}
+
+fn graph_payload(app: &App, options: &GraphOptions) -> Result<Value, RpcError> {
+    let fingerprint = graph_fingerprint(app)?;
+    let key = format!(
+        "{}|{}|{:.3}|{}|{}|{}|{}",
+        fingerprint,
+        options.granularity,
+        options.threshold,
+        options.top_k,
+        options.max_nodes,
+        options.max_edges,
+        options.focus.as_deref().unwrap_or(""),
+    );
+    if let Ok(guard) = graph_cache().lock() {
+        if let Some(entry) = guard.as_ref() {
+            if entry.key == key {
+                return Ok(entry.payload.clone());
+            }
+        }
+    }
+    let payload = graph_compute(app, options, &fingerprint)?;
+    if let Ok(mut guard) = graph_cache().lock() {
+        *guard = Some(GraphCacheEntry { key, payload: payload.clone() });
+    }
+    Ok(payload)
+}
+
+fn graph_compute(app: &App, options: &GraphOptions, watermark: &str) -> Result<Value, RpcError> {
+    let chunks = load_chunks(app)?;
+    let dimension = with_db(app, |conn| {
+        Ok(get_meta(conn, "embeddingDimension")
+            .and_then(|value| value.parse::<usize>().ok())
+            .unwrap_or(0))
+    })?;
+    let embedding = embedding_config(app).ok();
+    let configured = embedding.is_some();
+    let model = embedding.map(|value| value.model).unwrap_or_default();
+    let source_count = chunks
+        .iter()
+        .map(|chunk| &chunk.filename)
+        .collect::<HashSet<_>>()
+        .len();
+
+    let mut nodes = graph_nodes(&chunks, &options.granularity, dimension);
+    let total_nodes = nodes.len();
+    // 占位向量 '[0.0]' 长度为 1，dimension 通常 >= 2；据此区分真向量与词法占位
+    let vector_ready = dimension > 1 && nodes.iter().any(|node| node.vector.len() == dimension);
+    let context = GraphScoreContext::build(&nodes, vector_ready);
+
+    // 「发现」：以 focus 为中心取最相近的一批节点组成局部子图
+    if let Some(focus_id) = &options.focus {
+        if let Some(focus_index) = nodes.iter().position(|node| &node.id == focus_id) {
+            let mut ranked: Vec<(usize, f64)> = (0..nodes.len())
+                .filter(|&position| position != focus_index)
+                .map(|position| (position, context.score(&nodes[focus_index], &nodes[position])))
+                .collect();
+            ranked.sort_by(|left, right| {
+                right.1.partial_cmp(&left.1).unwrap_or(std::cmp::Ordering::Equal)
+            });
+            let mut picked = vec![focus_index];
+            picked.extend(
+                ranked
+                    .into_iter()
+                    .take(options.max_nodes.saturating_sub(1))
+                    .map(|(position, _)| position),
+            );
+            picked.sort_unstable();
+            let snapshot = nodes;
+            nodes = picked
+                .into_iter()
+                .filter_map(|position| snapshot.get(position).cloned())
+                .collect();
+        }
+    }
+
+    let truncated = total_nodes > nodes.len() || nodes.len() > options.max_nodes;
+    nodes.truncate(options.max_nodes);
+    let count = nodes.len();
+
+    let mut pairs: Vec<(usize, usize, f64)> = Vec::new();
+    if count > GRAPH_EXACT_LIMIT {
+        // 大库：先用词法倒排取候选，再只对这些候选算相似度
+        let mut inverted: HashMap<String, Vec<usize>> = HashMap::new();
+        for (position, node) in nodes.iter().enumerate() {
+            let unique: HashSet<&String> = node.terms.iter().collect();
+            for term in unique {
+                inverted.entry(term.clone()).or_default().push(position);
+            }
+        }
+        for left in 0..count {
+            let mut counter: HashMap<usize, usize> = HashMap::new();
+            for term in &nodes[left].terms {
+                if let Some(list) = inverted.get(term) {
+                    for &right in list {
+                        if right > left {
+                            *counter.entry(right).or_insert(0) += 1;
+                        }
+                    }
+                }
+            }
+            let mut candidates: Vec<(usize, usize)> = counter.into_iter().collect();
+            candidates.sort_by(|a, b| b.1.cmp(&a.1));
+            candidates.truncate(GRAPH_CANDIDATES);
+            for (right, _) in candidates {
+                pairs.push((left, right, context.score(&nodes[left], &nodes[right])));
+            }
+        }
+    } else {
+        for left in 0..count {
+            for right in (left + 1)..count {
+                pairs.push((left, right, context.score(&nodes[left], &nodes[right])));
+            }
+        }
+    }
+
+    // 词法分支的原始分不是 0~1，归一化后阈值滑杆才有稳定语义
+    if !vector_ready {
+        let max_raw = pairs.iter().fold(0.0f64, |acc, item| acc.max(item.2));
+        if max_raw > 0.0 {
+            for pair in &mut pairs {
+                pair.2 /= max_raw;
+            }
+        }
+    }
+    pairs.retain(|item| item.2 >= options.threshold);
+    pairs.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
+
+    let mut degree = vec![0usize; count];
+    let mut edges: Vec<Value> = Vec::new();
+    for (left, right, score) in &pairs {
+        if edges.len() >= options.max_edges {
+            break;
+        }
+        if degree[*left] >= options.top_k || degree[*right] >= options.top_k {
+            continue;
+        }
+        degree[*left] += 1;
+        degree[*right] += 1;
+        edges.push(json!({
+            "source": nodes[*left].id,
+            "target": nodes[*right].id,
+            "score": (score * 1000.0).round() / 1000.0,
+            "kind": if vector_ready { "semantic" } else { "lexical" },
+        }));
+    }
+
+    // chunk 粒度额外画「同文档相邻块」结构边，不参与相似度计算
+    if options.granularity == "chunk" {
+        for left in 0..count {
+            for right in (left + 1)..count {
+                if edges.len() >= options.max_edges {
+                    break;
+                }
+                let a = &nodes[left];
+                let b = &nodes[right];
+                let adjacent = match (a.chunk_id, b.chunk_id) {
+                    (Some(x), Some(y)) => (x - y).abs() == 1,
+                    _ => false,
+                };
+                if a.path != b.path || !adjacent {
+                    continue;
+                }
+                degree[left] += 1;
+                degree[right] += 1;
+                edges.push(json!({
+                    "source": a.id,
+                    "target": b.id,
+                    "score": 1.0,
+                    "kind": "adjacent",
+                }));
+            }
+        }
+    }
+
+    let node_values: Vec<Value> = nodes
+        .iter()
+        .enumerate()
+        .map(|(position, node)| {
+            json!({
+                "id": node.id,
+                "kind": node.kind,
+                "label": node.label,
+                "path": node.path,
+                "title": node.title,
+                "chunkId": node.chunk_id,
+                "excerpt": node.excerpt,
+                "degree": degree[position],
+                "chunkCount": node.chunk_count,
+                "isolated": degree[position] == 0,
+            })
+        })
+        .collect();
+
+    Ok(json!({
+        "nodes": node_values,
+        "edges": edges,
+        "meta": {
+            "computedAt": now_ms(),
+            "watermark": watermark,
+            "dimension": dimension,
+            "model": model,
+            "configured": configured,
+            "chunks": chunks.len(),
+            "sources": source_count,
+            "strategy": if vector_ready { "vector" } else { "lexical" },
+            "granularity": options.granularity,
+            "threshold": options.threshold,
+            "topK": options.top_k,
+            "truncated": truncated,
+            "nodeCount": count,
+            "edgeCount": edges.len(),
+            "maxNodes": options.max_nodes,
+            "maxEdges": options.max_edges,
+        },
+    }))
+}
+
+/// `kb/graph`：从向量库派生语义知识图谱（只读，不重新计算 embedding）
+pub fn graph(app: &App, params: &Value) -> RpcResult {
+    let options = graph_options(params);
+    Ok(graph_payload(app, &options)?)
+}
+
+/// `kb/graph/neighbors`：以某个节点为中心做局部「发现」，返回可合并的子图
+pub fn graph_neighbors(app: &App, params: &Value) -> RpcResult {
+    let node_id = param_str(params, "nodeId").trim().to_string();
+    if node_id.is_empty() {
+        return Err(RpcError::invalid("nodeId 不能为空"));
+    }
+    let mut options = graph_options(params);
+    options.focus = Some(node_id);
+    options.max_nodes = options.max_nodes.min(24);
+    options.max_edges = options.max_edges.min(80);
+    let payload = graph_payload(app, &options)?;
+    Ok(json!({
+        "nodes": payload.get("nodes").cloned().unwrap_or_else(|| json!([])),
+        "edges": payload.get("edges").cloned().unwrap_or_else(|| json!([])),
+        "meta": payload.get("meta").cloned().unwrap_or_else(|| json!({})),
+    }))
+}
+
 /* ---------------- 单元测试 ---------------- */
 
 #[cfg(test)]
@@ -1524,5 +2033,50 @@ mod tests {
         assert_eq!(dimension, 2);
         assert_eq!(sources.len(), 1);
         assert_eq!(documents[0].embedding.len(), 2);
+    }
+
+    #[test]
+    fn graph_excerpt_flattens_and_truncates() {
+        let text = "一行\n\n  另一行  ".repeat(40);
+        let excerpt = graph_excerpt(&text);
+        assert!(excerpt.chars().count() <= GRAPH_EXCERPT_CHARS);
+        assert!(!excerpt.contains('\n'));
+        assert!(!excerpt.contains("  "));
+    }
+
+    #[test]
+    fn graph_options_clamp_bounds() {
+        let options = graph_options(&json!({
+            "granularity": "chunk",
+            "threshold": 9.0,
+            "topK": 999,
+            "maxNodes": 1,
+            "maxEdges": 999999,
+            "focus": "  ",
+        }));
+        assert_eq!(options.granularity, "chunk");
+        assert_eq!(options.threshold, 1.0);
+        assert_eq!(options.top_k, 12);
+        assert_eq!(options.max_nodes, 20);
+        assert_eq!(options.max_edges, GRAPH_MAX_EDGES);
+        assert!(options.focus.is_none());
+    }
+
+    #[test]
+    fn graph_score_prefers_cosine_when_vectors_exist() {
+        let left = GraphNode {
+            id: "a".into(), kind: "source", label: "A".into(), path: "a.md".into(),
+            title: "A".into(), chunk_id: None, excerpt: String::new(),
+            vector: vec![1.0, 0.0], terms: vec!["alpha".into()], chunk_count: 1,
+        };
+        let right = GraphNode {
+            id: "b".into(), kind: "source", label: "B".into(), path: "b.md".into(),
+            title: "B".into(), chunk_id: None, excerpt: String::new(),
+            vector: vec![1.0, 0.0], terms: vec!["beta".into()], chunk_count: 1,
+        };
+        let context = GraphScoreContext::build(&[left.clone(), right.clone()], true);
+        assert!((context.score(&left, &right) - 1.0).abs() < 1e-9);
+        let lexical = GraphScoreContext::build(&[left.clone(), right.clone()], false);
+        assert_eq!(lexical.score(&left, &right), 0.0);
     }
 }

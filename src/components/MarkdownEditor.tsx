@@ -392,6 +392,67 @@ export function MarkdownEditor({
       return true
     }
 
+    /**
+     * 图谱「打开原笔记」后的知识块定位。
+     * 分块有 overlap 且 Markdown 标记在 Tiptap 里已被吃掉，所以把摘要和文本节点
+     * 同时压成「无空白 / 无标记」的紧凑串做包含匹配，命中后设选区并居中滚动。
+     * 依次尝试 16 / 10 / 6 字，跨多个文本节点时靠短针兜底。
+     */
+    const revealChunk: NonNullable<typeof editorBus.revealChunk> = (needle) => {
+      if (editor.isDestroyed || !needle) return false
+      const compact = (value: string) => value.replace(/[\s#*_`>~\[\]()!|]/g, '')
+      const doc = editor.state.doc
+      for (const length of [16, 10, 6]) {
+        const target = compact(needle).slice(0, length)
+        if (target.length < 4) continue
+        let found = -1
+        doc.descendants((node, pos) => {
+          if (found >= 0 || !node.isText || !node.text) return
+          const flat = compact(node.text)
+          const index = flat.indexOf(target)
+          if (index < 0) return
+          let seen = 0
+          for (let offset = 0; offset < node.text.length; offset += 1) {
+            if (!compact(node.text[offset])) continue
+            if (seen === index) {
+              found = pos + offset
+              break
+            }
+            seen += 1
+          }
+          if (found < 0) found = pos
+        })
+        if (found < 0) continue
+        const targetPos = Math.min(found, doc.content.size)
+        editor
+          .chain()
+          .setTextSelection(Math.min(targetPos + 1, doc.content.size))
+          .focus(undefined, { scrollIntoView: false })
+          .run()
+        const documentSnapshot = editor.state.doc
+        requestAnimationFrame(() => {
+          if (editor.isDestroyed || !editor.view.dom.isConnected || editor.state.doc !== documentSnapshot) return
+          const at = editor.view.domAtPos(Math.min(targetPos, documentSnapshot.content.size))
+          const raw = at.node
+          const element = raw instanceof HTMLElement ? raw : raw.parentElement
+          if (!element) return
+          const container = editor.view.dom.closest('[data-editor-viewport-root="true"]')
+          if (!(container instanceof HTMLElement)) {
+            element.scrollIntoView({ behavior: 'smooth', block: 'center' })
+            return
+          }
+          const rect = element.getBoundingClientRect()
+          const viewport = container.getBoundingClientRect()
+          const top = container.scrollTop + rect.top - viewport.top
+            - container.clientHeight / 2 + rect.height / 2
+          const max = Math.max(0, container.scrollHeight - container.clientHeight)
+          container.scrollTo({ top: Math.max(0, Math.min(max, top)), behavior: 'smooth' })
+        })
+        return true
+      }
+      return false
+    }
+
     // 顶部「插入块」按钮：在光标处另起一行并输入 `/` 唤起斜杠命令
     const openSlash = () => {
       const { $from } = editor.state.selection
@@ -403,6 +464,7 @@ export function MarkdownEditor({
 
     editorBus.insert = insert
     editorBus.scrollToHeading = scrollToHeading
+    editorBus.revealChunk = revealChunk
     editorBus.openSlash = openSlash
     editorBus.openMathDialog = () => setMathOpen(true)
     editorBus.openSearch = () => setSearchOpen(true)
@@ -413,6 +475,7 @@ export function MarkdownEditor({
       deactivateEditorOutline()
       if (editorBus.insert === insert) editorBus.insert = null
       if (editorBus.scrollToHeading === scrollToHeading) editorBus.scrollToHeading = null
+      if (editorBus.revealChunk === revealChunk) editorBus.revealChunk = null
       if (editorBus.openSlash === openSlash) editorBus.openSlash = null
       editorBus.openMathDialog = null
       editorBus.openSearch = null

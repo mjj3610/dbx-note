@@ -69,7 +69,7 @@ use serde_json::{json, Value};
 
 /// 插件标识与版本，必须与 manifest.json 保持一致
 const PLUGIN_ID: &str = "com.mjj3610.note";
-pub(crate) const PLUGIN_VERSION: &str = "0.5.8";
+pub(crate) const PLUGIN_VERSION: &str = "0.5.9";
 /// 协议版本
 const PROTOCOL_VERSION: i64 = 1;
 
@@ -341,6 +341,9 @@ fn dispatch(app: &App, method: &str, params: Value) -> RpcResult {
         "kb/search" => knowledge::search(app, &params),
         "kb/snapshotExport" => knowledge::export_snapshot(app),
         "kb/snapshotImport" => knowledge::import_snapshot(app, &params),
+        // 0.5.9 知识图谱：向量库只读派生视图（不重新计算 embedding）
+        "kb/graph" => knowledge::graph(app, &params),
+        "kb/graph/neighbors" => knowledge::graph_neighbors(app, &params),
         "image/read" => files::read_image(app, &params),
         "image/save" => files::save_image(app, &params),
         "image/upload" => imagehost::upload(&params),

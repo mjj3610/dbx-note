@@ -13,10 +13,13 @@ type ScrollHandler = (headingId: string) => boolean
 type SlashHandler = () => void
 type MathDialogHandler = () => void
 type SearchHandler = () => void
+/** 图谱「打开原笔记」后按知识块摘要在正文里定位；返回 false 由调用方重试 */
+type RevealHandler = (needle: string) => boolean
 
 export const editorBus: {
   insert: InsertHandler | null
   scrollToHeading: ScrollHandler | null
+  revealChunk: RevealHandler | null
   openSlash: SlashHandler | null
   /** 打开「插入块级公式」弹窗（斜杠命令 math.block 用） */
   openMathDialog: MathDialogHandler | null
@@ -25,6 +28,7 @@ export const editorBus: {
 } = {
   insert: null,
   scrollToHeading: null,
+  revealChunk: null,
   openSlash: null,
   openMathDialog: null,
   openSearch: null,
@@ -48,6 +52,12 @@ export function insertToEditor(markdown: string): boolean {
 export function scrollToHeading(id: string): boolean {
   if (!editorBus.scrollToHeading) return false
   return editorBus.scrollToHeading(id)
+}
+
+/** 按图谱知识块摘要定位到笔记正文（返回 false 表示可视化编辑器尚未就绪） */
+export function revealChunk(needle: string): boolean {
+  if (!editorBus.revealChunk) return false
+  return editorBus.revealChunk(needle)
 }
 
 /** 在光标处起一行并输入 `/`，唤起斜杠命令面板 */
