@@ -24,6 +24,8 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/menu'
 import { useT } from '@/lib/useT'
+import { scrollToHeading } from '@/lib/editorBus'
+import { getLatestHeadings, publishMarkdownHeadings } from '@/lib/outlineStore'
 import { toggleSidePane } from '@/lib/split'
 import { useNotesStore } from '@/stores/notes'
 import { useSettingsStore } from '@/stores/settings'
@@ -90,11 +92,20 @@ export function EditorPane() {
     setMode(useSettingsStore.getState().editor.viewMode)
   }, [activePath])
 
-  // 大纲点击 → 编辑器滚动
+  // 源码模式没有 Tiptap 实例，大纲改用 Markdown 文本兜底解析
+  useEffect(() => {
+    if (mode !== 'source') return
+    publishMarkdownHeadings(activePath ? content : '')
+  }, [mode, content, activePath])
+
+  // 大纲点击 → 编辑器按标题 id 定位；源码模式降级为按行号跳到 CodeMirror
   useEffect(() => {
     const handler = (event: Event) => {
-      const detail = (event as CustomEvent<string>).detail
-      if (detail) void import('@/lib/editorBus').then((module) => module.scrollToHeading(detail))
+      const headingId = (event as CustomEvent<string>).detail
+      if (!headingId || scrollToHeading(headingId)) return
+      const heading = getLatestHeadings().find((item) => item.id === headingId)
+      if (heading?.line === undefined) return
+      window.dispatchEvent(new CustomEvent('dbx-note:scroll-to-line', { detail: heading.line }))
     }
     window.addEventListener('dbx-note:scroll-to-heading', handler)
     return () => window.removeEventListener('dbx-note:scroll-to-heading', handler)
@@ -258,7 +269,7 @@ export function EditorPane() {
                 <OutlinePanel />
               </aside>
             ) : null}
-            <div className="min-h-0 flex-1 overflow-y-auto">
+            <div className="min-h-0 flex-1 overflow-y-auto" data-editor-viewport-root="true">
               <div
                 className="mx-auto w-full pl-14 pr-8 pt-6"
                 style={{ maxWidth: 'var(--dbx-note-editor-width, 760px)' }}

@@ -19,6 +19,7 @@ import {
   Server,
   ServerCog,
   Trash2,
+  Wifi,
 } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -31,12 +32,14 @@ import {
   backupExport,
   backupImport,
   backupList,
+  syncCheck,
   syncCommit,
   syncInit,
   syncOptions,
   syncPull,
   syncPullAll,
   syncPush,
+  type SyncCheckResult,
 
   syncRemote,
   syncSaveOptions,
@@ -71,6 +74,14 @@ type StoreProvider = (typeof STORE_PROVIDERS)[number]
 
 function isStoreProvider(value: string): value is StoreProvider {
   return (STORE_PROVIDERS as readonly string[]).includes(value)
+}
+
+/** 一次操作的展示级别：「没有改动」不该一律弹绿色成功 */
+type ActionResult = {
+  message: string
+  level?: 'success' | 'warning' | 'error'
+  /** 动作成功后需要重拉一次云端文件清单（换令牌 / 连接自检通过） */
+  refreshRemoteTree?: boolean
 }
 
 /**
@@ -156,11 +167,16 @@ export function SyncSection() {
   const [remote, setRemote] = useState('')
   const [token, setToken] = useState('')
   const [template, setTemplate] = useState('')
+  const [gitUsername, setGitUsername] = useState('')
   const [busy, setBusy] = useState('')
   const [output, setOutput] = useState('')
   const [error, setError] = useState('')
   // 上传 / 下载后让状态卡片重新拉一次
   const [storeTick, setStoreTick] = useState(0)
+  const remoteTreeFailure = useNotesStore((state) => state.remoteTreeFailure)
+  const remoteSyncing = useNotesStore((state) => state.remoteSyncing)
+  const retryRemoteTree = useNotesStore((state) => state.retryRemoteTree)
+  const [retryingTree, setRetryingTree] = useState(false)
 
   const provider = options?.provider ?? 'github'
   const store = isStoreProvider(provider)
@@ -172,6 +188,7 @@ export function SyncSection() {
       setOptions(config.options)
       setTemplate((current) => current || config.options.messageTemplate)
       setRemote((current) => current || next.remote)
+      setGitUsername(config.options.gitUsername ?? '')
       setError('')
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause))
@@ -182,21 +199,62 @@ export function SyncSection() {
     void refresh()
   }, [refresh])
 
-  const run = async (action: string, task: () => Promise<string>) => {
+  const run = async (action: string, task: () => Promise<string | ActionResult>) => {
     setBusy(action)
     setError('')
     setOutput('')
+    let shouldRefreshTree = false
     try {
-      const message = await task()
-      setOutput(message)
+      const result = await task()
+      const message = typeof result === 'string' ? result : result.message
+      const level = typeof result === 'string' ? 'success' : result.level ?? 'success'
+      shouldRefreshTree = typeof result !== 'string' && result.refreshRemoteTree === true
       await refresh()
-      toast.success(message)
+      setOutput(message)
+      if (level === 'error') {
+        setError(message)
+        toast.error(message)
+      } else if (level === 'warning') {
+        toast.warning(message)
+      } else {
+        toast.success(message)
+      }
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : String(cause)
       setError(message)
       toast.error(message)
     } finally {
       setBusy('')
+    }
+    // 与 refresh() 串行：清单拉取会跑一次 git fetch，和 sync/status、sync/options
+    // 并发时会抢 Sidecar 的 JSON-RPC 通道，让设置面板的状态回写变慢甚至超时。
+    if (shouldRefreshTree) void useNotesStore.getState().refreshRemoteTree({ force: true })
+  }
+
+  /**
+   * 设置页里的清单重试：与侧栏状态条复用同一个 store 入口。
+   * @returns 无返回值；成败通过 toast 与状态块是否消失反馈
+   */
+  const runTreeRetry = async (): Promise<void> => {
+    if (retryingTree || remoteSyncing) return
+    setRetryingTree(true)
+    try {
+      const recovered = await retryRemoteTree()
+      if (recovered) {
+        toast.success(t('sync.remoteTree.retryOk'))
+        return
+      }
+      const latest = useNotesStore.getState().remoteTreeFailure
+      toast.warning(
+        t('sync.remoteTree.retryFailed', {
+          message: latest?.message || t('sync.remoteTree.unknown'),
+        }),
+      )
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : String(cause)
+      toast.error(t('sync.remoteTree.retryFailed', { message }))
+    } finally {
+      setRetryingTree(false)
     }
   }
 
@@ -205,7 +263,9 @@ export function SyncSection() {
       const saved = await syncSaveOptions(patch)
       setOptions(saved.options)
       setToken('')
-      return t('toast.saved')
+      // 参考项目平台切换后立刻 loadRemoteSyncFiles()：换了仓库 / 令牌后
+      // 不用重启或切前台，云端文件就应当出现在文件树里。
+      return { message: t('toast.saved'), refreshRemoteTree: true }
     })
 
   const actions = [
@@ -213,7 +273,13 @@ export function SyncSection() {
       key: 'commit',
       label: t('sync.commit'),
       icon: Save,
-      run: async () => (await syncCommit('')).message,
+      run: async (): Promise<ActionResult> => {
+        const result = await syncCommit('')
+        if (result.committed) return { message: result.message }
+        // clean 是真的没有改动；其余两种情况要提醒用户「改动去哪了」
+        const level = result.reason === 'clean' ? 'success' : 'warning'
+        return { message: result.message, level }
+      },
     },
     {
       key: 'pull',
@@ -250,6 +316,20 @@ export function SyncSection() {
       // 推送成功后基线由后端自己收口（gitsync::record_base_from_head），
       // 这里不再多发一次 RPC，避免界面多等一个来回
       run: async () => (await syncPush()).output || t('sync.done'),
+    },
+    {
+      key: 'check',
+      label: t('sync.check'),
+      icon: Wifi,
+      run: async (): Promise<ActionResult> => {
+        const checked: SyncCheckResult = await syncCheck()
+        const detail = checked.effectiveProvider
+          ? `${t('sync.effectiveProvider')}: ${checked.effectiveProvider}${checked.username ? ` · ${checked.username}` : ''}\n${checked.message}`
+          : checked.message
+        // 认证刚恢复：由 run() 在本动作的状态刷新完成后重拉清单，
+        // 把之前因失败而没显示的云端文件补出来，同时不与 refresh() 抢通道。
+        return { message: detail, level: checked.ok ? 'success' : 'error', refreshRemoteTree: checked.ok }
+      },
     },
   ]
 
@@ -337,6 +417,13 @@ export function SyncSection() {
                   </dd>
                   <dt className="text-muted-foreground">{t('sync.remote')}</dt>
                   <dd className="truncate">{status?.remote || '—'}</dd>
+                  <dt className="text-muted-foreground">{t('sync.effectiveProvider')}</dt>
+                  <dd>
+                    {status?.effectiveProvider ?? provider}
+                    {status?.provider && status.provider !== status.effectiveProvider
+                      ? ` · ${t('sync.autoDetected')}`
+                      : ''}
+                  </dd>
                   <dt className="text-muted-foreground">{t('sync.changes')}</dt>
                   <dd>
                     {status?.isRepo
@@ -347,6 +434,15 @@ export function SyncSection() {
                         })
                       : '—'}
                   </dd>
+                  {status?.ignoredCount ? (
+                    <>
+                      <dt className="text-muted-foreground">{t('sync.ignored')}</dt>
+                      <dd className="truncate" title={(status.ignored ?? []).join('\n')}>
+                        {t('sync.ignoredCount', { count: status.ignoredCount })}
+                        ：{(status.ignored ?? []).slice(0, 2).join('、')}
+                      </dd>
+                    </>
+                  ) : null}
                   <dt className="text-muted-foreground">{t('sync.lastCommit')}</dt>
                   <dd className="truncate">
                     {status?.lastCommit ? `${status.lastCommit} ${status.lastCommitMessage ?? ''}` : '—'}
@@ -438,7 +534,37 @@ export function SyncSection() {
               <p className="text-[11px] text-muted-foreground">
                 {options?.hasToken ? t('sync.tokenKeep', { mask: options.tokenMask }) : t('sync.tokenHint')}
               </p>
+              {status?.maskedToken ? (
+                <p className="text-[11px] text-destructive" data-sync-masked-token="1">
+                  {t('sync.maskedToken')}
+                </p>
+              ) : null}
             </div>
+
+            {/* Gitee 私人令牌对用户名敏感：允许显式填账号名，留空自动尝试 oauth2 / 仓库 owner */}
+            {(status?.effectiveProvider ?? provider) === 'gitee' ? (
+              <div className="space-y-1.5" data-sync-git-username="1">
+                <Label>{t('sync.gitUsername')}</Label>
+                <div className="flex items-center gap-2">
+                  <Input
+                    autoComplete="off"
+                    value={gitUsername}
+                    onChange={(event) => setGitUsername(event.target.value)}
+                    placeholder="mjj3610"
+                    aria-label={t('sync.gitUsername')}
+                  />
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={busy !== ''}
+                    onClick={() => saveOptions({ gitUsername: gitUsername.trim() })}
+                  >
+                    {t('common.save')}
+                  </Button>
+                </div>
+                <p className="text-[11px] text-muted-foreground">{t('sync.gitUsernameHint')}</p>
+              </div>
+            ) : null}
 
             <div className="flex items-center justify-between rounded-lg border border-border px-3 py-2">
               <div className="min-w-0">
@@ -485,6 +611,44 @@ export function SyncSection() {
                 )
               })}
             </div>
+            {status?.lastError ? (
+              <div
+                className="rounded-md border border-destructive/30 bg-destructive/10 px-2.5 py-2 text-[11px] text-destructive"
+                data-sync-last-error="1"
+              >
+                <div className="font-medium">{t('sync.lastError')}</div>
+                <pre className="mt-1 max-h-28 overflow-auto whitespace-pre-wrap break-all font-sans">
+                  {status.lastError}
+                </pre>
+              </div>
+            ) : null}
+            {remoteTreeFailure ? (
+              <div
+                className="rounded-md border border-destructive/30 bg-destructive/10 px-2.5 py-2 text-[11px]"
+                data-sync-remote-tree-error="1"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <div className="font-medium text-destructive">{t('sync.remoteTree.failTitle')}</div>
+                  <Button
+                    size="xs"
+                    variant="outline"
+                    disabled={retryingTree || remoteSyncing}
+                    aria-busy={retryingTree || remoteSyncing}
+                    onClick={() => void runTreeRetry()}
+                    data-sync-remote-tree-retry="1"
+                  >
+                    {retryingTree ? <Loader2 className="size-3 animate-spin" /> : <RefreshCw className="size-3" />}
+                    {retryingTree ? t('sync.remoteTree.retrying') : t('sync.remoteTree.retry')}
+                  </Button>
+                </div>
+                <p className="mt-1 text-muted-foreground">{t('sync.remoteTree.failHint')}</p>
+                {remoteTreeFailure.message ? (
+                  <pre className="mt-1 max-h-24 overflow-auto whitespace-pre-wrap break-all font-sans text-destructive">
+                    {remoteTreeFailure.message}
+                  </pre>
+                ) : null}
+              </div>
+            ) : null}
             {output ? (
               <pre className="max-h-32 overflow-auto rounded-md bg-muted/50 p-2 text-[11px] whitespace-pre-wrap">
                 {output}

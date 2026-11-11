@@ -1,7 +1,7 @@
 {
   "name": "dbx-note",
   "private": true,
-  "version": "0.5.7",
+  "version": "0.5.8",
   "type": "module",
   "description": "DBX 笔记：本地优先的 Markdown 笔记与碎片记录工作台，支持 AI 助手",
   "license": "GPL-3.0-or-later",

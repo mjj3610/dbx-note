@@ -69,7 +69,7 @@ use serde_json::{json, Value};
 
 /// 插件标识与版本，必须与 manifest.json 保持一致
 const PLUGIN_ID: &str = "com.mjj3610.note";
-pub(crate) const PLUGIN_VERSION: &str = "0.5.7";
+pub(crate) const PLUGIN_VERSION: &str = "0.5.8";
 /// 协议版本
 const PROTOCOL_VERSION: i64 = 1;
 
@@ -395,6 +395,7 @@ fn dispatch(app: &App, method: &str, params: Value) -> RpcResult {
         "sync/commit" => sync::commit(app, &params),
         "sync/pull" => sync::pull(app),
         "sync/push" => sync::push(app),
+        "sync/check" => sync::check(app),
         // 单文件同步：打开笔记时比对远端版本、按需拉取（与 NoteGen 的
         // compareFileVersions / pullFile / pullAllRemoteLibraryFiles 同构）
         "sync/fetch" => gitsync::fetch(app),

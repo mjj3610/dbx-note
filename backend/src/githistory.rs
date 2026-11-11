@@ -158,18 +158,20 @@ fn choose_ref(root: &PathBuf, branch: &str, fetched: bool) -> String {
 fn repo_info(app: &App) -> Result<(PathBuf, RepoInfo), RpcError> {
     let root = git_root(app)?;
     let options = sync::load_options(app);
-    let provider = options
+    let configured = options
         .get("provider")
         .and_then(Value::as_str)
-        .unwrap_or("github")
-        .to_string();
-    if !GIT_PROVIDERS.contains(&provider.as_str()) {
-        return Err(RpcError::invalid("历史版本需要配置 GitHub / Gitee / GitLab / Gitea 同步"));
-    }
+        .unwrap_or("github");
     let (has_remote, remote, _) = sync::git(&root, &["remote", "get-url", "origin"]);
     let remote = remote.trim().to_string();
     if !has_remote || remote.is_empty() {
         return Err(RpcError::invalid("还没有配置远端仓库"));
+    }
+    // 平台由远端地址决定：只填了 gitee.com 地址、平台列表仍停在 github 时，
+    // 历史版本也应该可用，而且 fetch 要用 Gitee 的凭据格式。
+    let provider = sync::provider_for_url(&remote, configured);
+    if !GIT_PROVIDERS.contains(&provider.as_str()) {
+        return Err(RpcError::invalid("历史版本需要配置 GitHub / Gitee / GitLab / Gitea 同步"));
     }
     let (base_url, owner, repo) = parse_remote(&remote)
         .ok_or_else(|| RpcError::invalid("远端仓库地址无法解析"))?;

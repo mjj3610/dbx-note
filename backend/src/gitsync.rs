@@ -185,13 +185,14 @@ fn fetch_snapshot(app: &App) -> Result<Snapshot, RpcError> {
         return Err(RpcError::invalid("还没有配置远端仓库"));
     }
     let branch = sync::current_branch(&root);
-    let config = sync::load_options(app);
-    let provider = config
-        .get("provider")
-        .and_then(Value::as_str)
-        .unwrap_or("github");
-    let token = config.get("token").and_then(Value::as_str).unwrap_or_default();
-    let target = sync::authorized_url(&remote, provider, token).unwrap_or_else(|| "origin".to_string());
+    // 与 sync/push 共用同一套认证策略：按远端主机判定平台、支持 Gitee 多个候选用户名。
+    // 这里取第一个候选即可，真正的失败原因由设置页「测试连接」给出。
+    let plan = sync::auth_plan(app, &remote);
+    let target = plan
+        .urls
+        .first()
+        .cloned()
+        .unwrap_or_else(|| "origin".to_string());
 
     // 低速阈值：弱网时 15 秒内不足 1KB/s 就中断，避免打开笔记长时间转圈
     let (ok, _, err) = sync::git(
@@ -208,11 +209,12 @@ fn fetch_snapshot(app: &App) -> Result<Snapshot, RpcError> {
         ],
     );
     if !ok {
-        return Err(sync::fail(&err, "git fetch 失败：请检查网络与仓库凭据"));
+        // 失败原因会显示在文件树顶部的状态条，必须先把可能回显的令牌打码
+        return Err(sync::redact_error(app, &err, "git fetch 失败：请检查网络与仓库凭据"));
     }
     let (has_head, head, head_err) = sync::git(&root, &["rev-parse", "FETCH_HEAD"]);
     if !has_head || head.trim().is_empty() {
-        return Err(sync::fail(&head_err, "无法解析远端提交"));
+        return Err(sync::redact_error(app, &head_err, "无法解析远端提交"));
     }
     let head = head.trim().to_string();
     // 让 status 里的 ahead/behind 也跟上（fetch 到 FETCH_HEAD 不会自动更新跟踪引用）
@@ -220,7 +222,7 @@ fn fetch_snapshot(app: &App) -> Result<Snapshot, RpcError> {
 
     let (listed, tree, tree_err) = sync::git(&root, &["ls-tree", "-r", "-l", "FETCH_HEAD"]);
     if !listed {
-        return Err(sync::fail(&tree_err, "无法读取远端文件列表"));
+        return Err(sync::redact_error(app, &tree_err, "无法读取远端文件列表"));
     }
     Ok(Snapshot {
         head,
@@ -797,6 +799,8 @@ pub fn list_remote(app: &App) -> RpcResult {
         .to_string();
     let (has_top, toplevel, _) = sync::git(&root, &["rev-parse", "--show-toplevel"]);
     let (has_remote, remote, _) = sync::git(&root, &["remote", "get-url", "origin"]);
+    // 远端清单一律按地址实际所属平台回报，避免配置里仍写着 github 造成误判
+    let provider = sync::provider_for_url(&remote, &provider);
     if !has_top || !sync::same_path(&toplevel, &root) || !has_remote || remote.trim().is_empty() {
         return Ok(json!({
             "configured": false,

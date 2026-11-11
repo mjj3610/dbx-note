@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react'
 import CodeMirror from '@uiw/react-codemirror'
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
 import { EditorView } from '@codemirror/view'
@@ -54,10 +55,29 @@ export function SourceEditor({
     sourceTheme,
     ...(wrap ? [EditorView.lineWrapping] : []),
   ]
+  /** 源码模式下大纲点击按行号定位（可视化模式由 Tiptap 按 pos 定位） */
+  const viewRef = useRef<EditorView | null>(null)
+
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const line = Number((event as CustomEvent<number>).detail)
+      const view = viewRef.current
+      if (!view || !Number.isFinite(line) || line < 0) return
+      const number = Math.min(Math.max(1, line + 1), view.state.doc.lines)
+      const target = view.state.doc.line(number)
+      view.dispatch({ selection: { anchor: target.from }, scrollIntoView: true })
+      view.focus()
+    }
+    window.addEventListener('dbx-note:scroll-to-line', handler)
+    return () => window.removeEventListener('dbx-note:scroll-to-line', handler)
+  }, [])
 
   return (
     <CodeMirror
       value={value}
+      onCreateEditor={(view) => {
+        viewRef.current = view
+      }}
       onChange={onChange}
       editable={!readOnly}
       extensions={extensions}

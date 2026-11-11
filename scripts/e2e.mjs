@@ -1433,6 +1433,10 @@ await templateInput.blur()
 await page.waitForTimeout(900)
 check('提交信息模板已保存', (await templateInput.inputValue()) === 'notes {date}')
 
+// v0.5.8：同步诊断入口（真正发起 ls-remote 的场景由 sidecar-check 用本地裸仓库覆盖）
+check('状态卡片显示生效平台', (await page.locator('text=生效平台').count()) > 0)
+check('Git 通道提供测试连接按钮', (await page.getByRole('button', { name: '测试连接' }).count()) >= 1)
+
 // 对象存储 / WebDAV / 自托管：配置表单真的能填能存
 // 「服务地址」「Secret Access Key」等标签在别的设置页也有同名项，全部限定在同步面板内
 const syncPanel = page.locator('[data-settings-panel="sync"]')
@@ -2510,6 +2514,38 @@ check(
   '重新打开后磁盘公式未被改写',
   syncedMathSource.includes('$E = mc^2$') && syncedMathSource.includes('$$'),
 )
+
+/* ---------- 云端清单失败可见化（对齐参考项目 unified-sync-status） ---------- */
+// 把 origin 换成本地不存在的裸仓库：git fetch 会立刻失败，不会真的联网等超时
+let previousOrigin = ''
+try { previousOrigin = gitE2e('remote', 'get-url', 'origin').trim() } catch { /* 本来就没有 */ }
+try {
+  gitE2e('remote', 'set-url', 'origin', join(WORKSPACE, '..', 'missing-origin-e2e.git').replace(/\\/g, '/'))
+  // focus 会触发 refreshRemoteTree({force:true})；App 内有 5 秒去重，被挡住就稍后再派一次
+  let treeAlertSeen = false
+  for (let attempt = 0; attempt < 3 && !treeAlertSeen; attempt += 1) {
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+    for (let wait = 0; wait < 20; wait += 1) {
+      treeAlertSeen = (await page.locator('[data-remote-tree-alert]').count()) > 0
+      if (treeAlertSeen) break
+      await page.waitForTimeout(300)
+    }
+    if (!treeAlertSeen) await page.waitForTimeout(5200)
+  }
+  check('云端清单拉取失败时显示状态条', treeAlertSeen)
+  check('状态条提供重试入口', (await page.locator('[data-remote-tree-retry]').count()) >= 1)
+  const alertText = treeAlertSeen
+    ? await page.locator('[data-remote-tree-alert]').innerText({ timeout: 2000 }).catch(() => '')
+    : ''
+  check('状态条展示失败标题', alertText.includes('云端文件清单拉取失败'))
+} catch (error) {
+  console.error('  ! 清单失败态用例异常：', error.message)
+  check('云端清单拉取失败时显示状态条', false, error.message)
+} finally {
+  if (previousOrigin) {
+    try { gitE2e('remote', 'set-url', 'origin', previousOrigin) } catch { /* 测试即将结束 */ }
+  }
+}
 
 if (badResponses.length > 0) console.log(`  失败资源：${JSON.stringify([...new Set(badResponses)])}`)
 check('控制台无错误', errors.length === 0, errors.slice(0, 3).join(' | '))

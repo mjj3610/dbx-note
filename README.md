@@ -159,8 +159,8 @@ DBX_NOTE_CHECK_DATA=.tmp/check-fresh npm run sidecar-check
 npm run mock-ai            # http://127.0.0.1:5199/v1
 
 # 测试
-npm run sidecar-check      # 后端协议 194 项断言（含截屏 / 桌面框选 / 像素自检 / 钉在顶层 / 系统 OCR / 剪贴板读写 / 全局热键 / 录音 / 画布 / 图片 / 识别 / 转写 / MCP / 同步通道 / 远端清单 / 另存为导出 / 远端提交历史 / 备份）
-npm run smoke              # 界面冒烟 12 项 + 截图
+npm run sidecar-check      # 后端协议 205 项断言（含截屏 / 桌面框选 / 像素自检 / 钉在顶层 / 系统 OCR / 剪贴板读写 / 全局热键 / 录音 / 画布 / 图片 / 识别 / 转写 / MCP / 同步通道 / 远端清单 / 另存为导出 / 远端提交历史 / 备份）
+npm run smoke              # 界面冒烟 25 项 + 截图（含大纲 H1~H6 全级别点击定位）
 node scripts/mock-mcp.mjs  # 假的 MCP 服务（e2e 与自检用，暴露 echo / now）
 npm run e2e                # 端到端约 330 项（标签页 / 搜索 / AI 多厂商配置 / 选区 AI / 画布图形库与图表 / 手绘 / 截图工具与全局热键 / 图片设置面板 / 编辑器底栏 / 历史版本 / 对照 / 斜杠命令 / 标题折叠 / 公式往返 / 同步 / 备份 / 识别 / 语音 / MCP / 窄屏）
 
@@ -337,12 +337,13 @@ SQLite 表：`settings`、`records`、`tags`、`record_tags`、`chats`、`messag
 | 项目 | 结果 |
 | --- | --- |
 | `npm run typecheck` | 0 错误 |
-| `npm run sidecar-check` | **194 / 0** |
-| `npm run smoke` | **12 / 0**，截图 5 张 |
-| `npm run e2e` | 完整一轮 **316 通过 / 11 失败**；**v0.5.7 新增的 12 条断言全通过**（公式 Markdown 往返与冷启动重开、列表项内 `/` 触发、真实鼠标穿过装订线后 `+` 可点、关闭 tab 不闪退）。11 项均为既有的环境 / 时序敏感断言（Git 版本与仓库、同步平台表单、备份、全局热键、历史版本入口、MCP 试运行、AI 消息），与本版改动无关，详见 `docs/release-notes-v0.5.7.md`「回归」节 |
+| `npm run sidecar-check` | **205 / 0**；v0.5.8 的 8 条同步诊断 + 3 条清单失败态断言全通过 |
+| `npm run smoke` | **25 / 0**，截图 5 张；其中 13 条为大纲回归（索引链路、H1~H6 层级识别、H1~H6 点击定位） |
+| `npm run e2e` | **337 通过 / 1 失败**；唯一失败为「全局截图有明确结局（完成或取消）」，属本机锁屏 / 远程会话导致截屏链路无结局的既有环境项，与本次大纲改动无关。清单失败态 3 条与 v0.5.8 既有 2 条界面断言全通过，详见 `docs/release-notes-v0.5.8.md`「回归」节 |
 | `node scripts/ui-probe-840.mjs` | 31 通过 / 0 失败（本版未重跑，历史结果） |
-| `cargo build --release` + 后端单元测试 | 构建通过（1 条既存 `dead_code` 警告）；**15 / 0** |
-| 产物 | GitHub Actions 的 5 平台矩阵在 `v0.5.7` tag 上构建，CI run `42823213363` **一次通过**（121 条 npmmirror 地址已换成 `registry.npmjs.org`，不再出现 504）；Release https://github.com/mjj3610/dbx-note/releases/tag/v0.5.7 ，商店候选 https://github.com/t8y2/dbx-store/pull/498 等待维护者 `/sign` |
+| 后端单元测试 | `cargo test --bin backend` **24 / 0**（含新增「清单失败文案脱敏」单测，以及 1 条真实 Git 仓库集成用例）；`cargo check` 通过（1 条既存 `dead_code` 警告） |
+| 本地产物说明 | 本机 `cargo build --release`（`lto = true`）已在 `backend/` 目录内增量重建成功（2m08s），并用它生成可安装的 `.dbxp`；本地协议 / 界面回归使用新编译的 debug Sidecar（`DBX_NOTE_BACKEND` 指向 `backend/target/debug/backend.exe`）；CI 的 5 平台矩阵仍负责正式发布产物 |
+| 产物 | 本地安装包 `release/com.mjj3610.note-0.5.8-windows-x64.dbxp`（3,911,385 B，sha256 `7f2fe5922127d93162a1291d2063e9e167c438e0154c68fbb2e91994f124f716`）已包含大纲修复并重新校验（12/12 checksums、Sidecar 字节一致）；上一版 `v0.5.7` 的 5 平台矩阵 CI run `42823213363` 一次通过；Release https://github.com/mjj3610/dbx-note/releases/tag/v0.5.7 ，商店候选 https://github.com/t8y2/dbx-store/pull/498 等待维护者 `/sign`。v0.5.8 尚未发布 |
 
 截图链路除了功能断言，还有一条**像素级自检**：`screenshot/window` 返回的
 `pixels.inside` / `pixels.outside` 分别核对「选区内是否 1:1 原像素」「选区外是否压暗」，

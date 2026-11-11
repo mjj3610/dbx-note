@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { EditorContent, useEditor, useEditorState } from '@tiptap/react'
+import type { EditorEvents } from '@tiptap/core'
 import type { EditorView } from '@tiptap/pm/view'
 import { BubbleMenu } from '@tiptap/react/menus'
 import StarterKit from '@tiptap/starter-kit'
@@ -20,6 +21,13 @@ import { useT } from '@/lib/useT'
 import { useNotesStore } from '@/stores/notes'
 import { useSettingsStore } from '@/stores/settings'
 import { editorBus } from '@/lib/editorBus'
+import { OutlineHeadingIndex } from '@/lib/outlineIndex'
+import {
+  deactivateEditorOutline,
+  getLatestHeadings,
+  publishHeadings,
+  untitledHeading,
+} from '@/lib/outlineStore'
 import { isRemoteImage, persistImage } from '@/lib/imageStore'
 import { imageMarkdown } from '@/lib/imageAttrs'
 import * as rpc from '@/lib/rpc'
@@ -314,21 +322,74 @@ export function MarkdownEditor({
       }
     }
 
-    const scrollToHeading: NonNullable<typeof editorBus.scrollToHeading> = (headingText) => {
-      let target: number | null = null
-      editor.state.doc.descendants((node, position) => {
-        if (target !== null) return false
-        if (node.type.name === 'heading' && node.textContent.trim() === headingText.trim()) {
-          target = position
-          return false
-        }
-        return true
-      })
-      if (target !== null) {
-        const dom = editor.view.domAtPos(target).node as HTMLElement
-        const element = dom.nodeType === 1 ? (dom as HTMLElement) : dom.parentElement
-        element?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    /**
+     * 标题索引：对齐参考项目，直接从 ProseMirror doc 建 id / pos 索引，
+     * 每次 transaction 只重扫变更区间，不再每次按键对整篇 Markdown 做 split + 正则。
+     * 索引与编辑器同源，标题的 inline 语法、重复标题都不会导致点击失配。
+     */
+    const headingIndex = new OutlineHeadingIndex()
+    const rebuildHeadings = () => {
+      publishHeadings(headingIndex.rebuild(editor.state.doc, untitledHeading), 'editor')
+    }
+    rebuildHeadings()
+
+    const handleTransaction = ({ transaction, appendedTransactions }: EditorEvents['transaction']) => {
+      try {
+        publishHeadings(
+          headingIndex.update(
+            editor.state.doc,
+            [transaction, ...appendedTransactions],
+            untitledHeading,
+          ),
+          'editor',
+        )
+      } catch (error) {
+        console.warn('[outline] 标题索引增量更新失败，已重建：', error)
+        rebuildHeadings()
       }
+    }
+    editor.on('transaction', handleTransaction)
+
+    /**
+     * 大纲点击定位（参考项目 `outline.tsx::scrollToHeading`）。
+     * 用索引里的 pos 直接设选区，再 nodeDOM 取真实标题元素、在明确的滚动容器里 scrollTo；
+     * 任意层级 / 重复标题 / 带行内语法的标题都能命中，也避免 domAtPos 拿到文本节点
+     * 或被嵌套滚动容器影响。
+     */
+    const scrollToHeading: NonNullable<typeof editorBus.scrollToHeading> = (headingId) => {
+      const heading = getLatestHeadings().find((item) => item.id === headingId)
+      if (!heading || heading.pos < 0 || editor.isDestroyed) return false
+      const targetPos = heading.pos
+      const doc = editor.state.doc
+      if (targetPos >= doc.content.size || doc.nodeAt(targetPos)?.type.name !== 'heading') return false
+
+      // 不让 focus 触发一次针对旧选区的竞争滚动
+      editor
+        .chain()
+        .setTextSelection(Math.min(targetPos + 1, doc.content.size))
+        .focus(undefined, { scrollIntoView: false })
+        .run()
+
+      const documentSnapshot = editor.state.doc
+      requestAnimationFrame(() => {
+        if (editor.isDestroyed || !editor.view.dom.isConnected || editor.state.doc !== documentSnapshot) return
+        if (documentSnapshot.nodeAt(targetPos)?.type.name !== 'heading') return
+        const domNode = editor.view.nodeDOM(targetPos)
+        if (!(domNode instanceof HTMLElement)) return
+        const scrollContainer = editor.view.dom.closest('[data-editor-viewport-root="true"]')
+        if (!(scrollContainer instanceof HTMLElement)) {
+          domNode.scrollIntoView({ behavior: 'smooth', block: 'center' })
+          return
+        }
+        const headingRect = domNode.getBoundingClientRect()
+        const viewportRect = scrollContainer.getBoundingClientRect()
+        const centeredTop = scrollContainer.scrollTop + headingRect.top + headingRect.height / 2
+          - viewportRect.top - scrollContainer.clientTop - scrollContainer.clientHeight / 2
+        const maxScrollTop = Math.max(0, scrollContainer.scrollHeight - scrollContainer.clientHeight)
+        const top = Math.max(0, Math.min(maxScrollTop, centeredTop))
+        scrollContainer.scrollTo({ top, behavior: 'smooth' })
+      })
+      return true
     }
 
     // 顶部「插入块」按钮：在光标处另起一行并输入 `/` 唤起斜杠命令
@@ -347,6 +408,9 @@ export function MarkdownEditor({
     editorBus.openSearch = () => setSearchOpen(true)
 
     return () => {
+      editor.off('transaction', handleTransaction)
+      // 切到源码模式 / 切换文件时先回退到 Markdown 文本大纲，面板不留空白
+      deactivateEditorOutline()
       if (editorBus.insert === insert) editorBus.insert = null
       if (editorBus.scrollToHeading === scrollToHeading) editorBus.scrollToHeading = null
       if (editorBus.openSlash === openSlash) editorBus.openSlash = null

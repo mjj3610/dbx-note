@@ -5,7 +5,11 @@
  * 避免把 editor 放进全局 store 造成不必要的重渲染。
  */
 type InsertHandler = (markdown: string, mode: 'append' | 'replace') => void
-type ScrollHandler = (headingText: string) => void
+/**
+ * 按标题 id 定位（参考项目同款语义）。
+ * 返回 false 表示当前没有可用的可视化编辑器（例如源码模式），由调用方降级到行号跳转。
+ */
+type ScrollHandler = (headingId: string) => boolean
 type SlashHandler = () => void
 type MathDialogHandler = () => void
 type SearchHandler = () => void
@@ -40,11 +44,10 @@ export function insertToEditor(markdown: string): boolean {
   return true
 }
 
-/** 跳转到指定标题 */
-export function scrollToHeading(text: string): boolean {
+/** 跳转到指定标题（id 来自大纲索引，而非标题文本） */
+export function scrollToHeading(id: string): boolean {
   if (!editorBus.scrollToHeading) return false
-  editorBus.scrollToHeading(text)
-  return true
+  return editorBus.scrollToHeading(id)
 }
 
 /** 在光标处起一行并输入 `/`，唤起斜杠命令面板 */

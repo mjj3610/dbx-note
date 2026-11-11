@@ -1017,8 +1017,21 @@ export interface SyncStatus {
   lastCommitMessage?: string
   lastCommitAt: string
   provider?: string
+  /** 按远端地址实际识别出来的平台，可能与用户选中的平台不同 */
+  effectiveProvider?: string
+  authUsername?: string
   autoCommit?: boolean
   hasToken?: boolean
+  /** 保存的是界面掩码而不是真实令牌 */
+  maskedToken?: boolean
+  ignored?: string[]
+  ignoredCount?: number
+  /** 最近一次同步失败（含后台自动同步），已打码 */
+  lastError?: string
+  lastErrorAt?: number
+  lastErrorStage?: string
+  lastSuccessAt?: number
+  lastSuccessStage?: string
 }
 
 /** 同步配置（provider / token / 自动提交 / 提交信息模板） */
@@ -1029,6 +1042,8 @@ export interface SyncOptions {
   tokenMask: string
   autoCommit: boolean
   messageTemplate: string
+  /** Gitee 私人令牌用的账号名，可留空自动尝试 */
+  gitUsername?: string
 }
 
 export function syncOptions(): Promise<{ options: SyncOptions }> {
@@ -1039,6 +1054,7 @@ export async function syncSaveOptions(params: {
   provider?: string
   token?: string
   clearToken?: boolean
+  gitUsername?: string
   autoCommit?: boolean
   messageTemplate?: string
 }): Promise<{ options: SyncOptions }> {
@@ -1062,7 +1078,16 @@ export function syncRemote(url: string): Promise<SyncStatus> {
   return call('sync/remote', { url }, 30_000)
 }
 
-export function syncCommit(message: string): Promise<{ committed: boolean; message: string }> {
+export interface SyncCommitResult {
+  committed: boolean
+  message: string
+  /** clean=真的没改动；unpushed=已被自动同步提交但没推送；ignored=被 .gitignore 排除 */
+  reason?: 'clean' | 'unpushed' | 'ignored' | 'committed'
+  ahead?: number
+  ignored?: string[]
+}
+
+export function syncCommit(message: string): Promise<SyncCommitResult> {
   return call('sync/commit', { message }, 60_000)
 }
 
@@ -1072,6 +1097,20 @@ export function syncPull(): Promise<{ ok: boolean; output: string }> {
 
 export function syncPush(): Promise<{ ok: boolean; output: string }> {
   return call('sync/push', {}, 180_000)
+}
+
+export interface SyncCheckResult {
+  ok: boolean
+  message: string
+  effectiveProvider?: string
+  username?: string
+  hasToken?: boolean
+  maskedToken?: boolean
+}
+
+/** 用与推送完全相同的凭据做一次 ls-remote 连接自检 */
+export function syncCheck(): Promise<SyncCheckResult> {
+  return call('sync/check', {}, 60_000)
 }
 
 /* ---------------- Git 通道的单文件同步 ---------------- */
@@ -1124,8 +1163,12 @@ export interface RemoteTreeSnapshot {
  * 进入文件树时拉取远端「目录清单」
  *
  * 与参考项目 `loadRemoteSyncFiles()` 同义：不下载正文，只用于把仅云端节点
- * 合并进文件树、给本地节点打「云端有更新」标记。失败时后端返回 offline，
- * 调用方静默保留本地树即可。
+ * 合并进文件树、给本地节点打「云端有更新」标记。
+ *
+ * 失败时后端返回 `offline: true` 与已脱敏的 `message`（令牌会被打码）。
+ * 调用方必须把失败展示出来并提供重试入口，不能静默丢弃：否则用户只会看到
+ * 「云端文件一直不出现」，却不知道是认证 / 网络失败。参考项目对应
+ * `sync-directory-completed` → `unified-sync-status` 的失败态与重试。
  */
 export function syncRemoteTree(): Promise<RemoteTreeSnapshot> {
   return call('sync/remoteTree', {}, 120_000)

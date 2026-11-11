@@ -10,6 +10,8 @@
  * 2. 刚拉下来的文件 1 秒内不触发自动推送（参考项目的 `justPulledFile`），
  *    否则拉取引起的改动会被立刻当成本地修改再推回去。
  */
+import { toast } from 'sonner'
+
 import {
   syncCommit,
   syncCompare,
@@ -62,6 +64,26 @@ let running = false
 let queued = false
 /** 最近一次拉取完成的时间戳，用于 1 秒内抑制回推 */
 let justPulledAt = 0
+/** 去重：同一个失败不要每 5 秒重复上报 */
+let lastFailure = ''
+let lastNotifyAt = 0
+
+/** 后台同步失败不再完全静默：写日志、发事件，并只在认证类错误时弹一次提示 */
+function reportFailure(error: unknown): void {
+  const message = error instanceof Error ? error.message : String(error)
+  console.warn('[autoSync] 同步失败：', message)
+  if (message === lastFailure) return
+  lastFailure = message
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('dbx:sync-error', { detail: message }))
+  }
+  const authFailure =
+    /authentication failed|incorrect username or password|access token|认证失败|令牌|凭据/i.test(message)
+  if (authFailure && Date.now() - lastNotifyAt > 120_000) {
+    lastNotifyAt = Date.now()
+    toast.warning(message, { duration: 8000 })
+  }
+}
 
 /** `autoSync` 取值 → 毫秒 */
 function toDelayMs(value: unknown): number {
@@ -120,13 +142,16 @@ async function flush(mode: Mode) {
   try {
     if (mode === 'store') await syncStorePush({ removeDeleted: false })
     else if (mode === 'git') {
-      // Git 通道：先提交，再推送；没配置远端 / 无凭据时静默失败（同步页里能看到原因）。
+      // Git 通道：先提交，再推送。
       // 基线由后端在推送成功后自己收口，这里不必再发一次 recordBase。
       await syncCommit('')
       await syncPush()
     }
-  } catch {
-    // 自动同步失败不打扰用户，设置页的日志与状态卡片里能看到原因
+    lastFailure = ''
+  } catch (error) {
+    // 后端会把失败原因写进 sync/status；这里额外发事件 + 认证错误时提示一次，
+    // 避免「自动同步明明跑过，远端却一直没更新」这种静默失败。
+    reportFailure(error)
   } finally {
     running = false
     if (queued) {

@@ -902,6 +902,11 @@ async function main() {
       beforeInit.configured === false,
       JSON.stringify({ configured: beforeInit.configured, count: beforeInit.files?.length }),
     )
+    check(
+      '未配置同步时清单带回可展示的说明文案',
+      typeof beforeInit.message === 'string' && beforeInit.message.length > 0,
+      JSON.stringify({ message: beforeInit.message }),
+    )
 
     // 工作区当仓库，远端指向本地裸仓库（等价于 https 远端，只是不打网络）
     await call('sync/init', { url: originDir.replace(/\\/g, '/') })
@@ -913,6 +918,31 @@ async function main() {
     await call('sync/recordBase')
     check('推送后基线已对齐', (await call('sync/compare', { path: 'sync-test.md' })).action === 'none')
     check('初始化仓库会忽略同步状态目录', readFileSync(join(WORKSPACE, '.gitignore'), 'utf8').includes('.dbx-note/'))
+
+    // v0.5.8：连接自检 / 空改动可解释 / 平台按地址识别 / 掩码令牌不参与认证
+    const connection = await call('sync/check')
+    check('连接自检通过（本地裸仓库）', connection.ok === true, connection.message)
+    check('连接自检回传生效平台', typeof connection.effectiveProvider === 'string', String(connection.effectiveProvider))
+    const noChange = await call('sync/commit', { message: 'no-op' })
+    check(
+      '无改动提交返回可解释原因',
+      noChange.committed === false && typeof noChange.reason === 'string',
+      JSON.stringify(noChange),
+    )
+    const statusAfter = await call('sync/status')
+    check('同步状态带生效平台', typeof statusAfter.effectiveProvider === 'string', String(statusAfter.effectiveProvider))
+    check('同步状态带上次同步结果', 'lastError' in statusAfter && 'lastSuccessAt' in statusAfter)
+    await call('sync/saveOptions', { gitUsername: 'mjj3610' })
+    check('可保存 Gitee 账号名', (await call('sync/options')).options?.gitUsername === 'mjj3610')
+    await call('sync/saveOptions', { token: 'd350****1c' })
+    check('掩码令牌会被识别', (await call('sync/status')).maskedToken === true)
+    const maskedCheck = await call('sync/check')
+    check(
+      '掩码令牌不会当作凭据使用',
+      maskedCheck.ok === false && maskedCheck.maskedToken === true,
+      maskedCheck.message,
+    )
+    await call('sync/saveOptions', { clearToken: true, gitUsername: '' })
 
     // 另一台设备改了同一个笔记并推送
     git(['clone', originDir, peerDir])
@@ -991,6 +1021,30 @@ async function main() {
       localNow?.localExists === true && localNow.status !== 'remoteOnly',
       JSON.stringify(localNow),
     )
+
+    // 清单拉取失败必须带回可展示原因（前端状态条据此提示 + 重试），
+    // 对齐参考项目 `sync-directory-completed` 的失败分支。
+    const reachableOrigin = git(['remote', 'get-url', 'origin'], WORKSPACE).trim()
+    const deadOrigin = join(DATA_DIR, 'missing-origin.git').replace(/\\/g, '/')
+    try {
+      git(['remote', 'set-url', 'origin', deadOrigin], WORKSPACE)
+      const offlineTree = await call('sync/remoteTree')
+      check(
+        '远端不可达时清单返回 offline 与可展示原因',
+        offlineTree.configured === true
+          && offlineTree.offline === true
+          && typeof offlineTree.message === 'string'
+          && offlineTree.message.length > 0,
+        JSON.stringify({ configured: offlineTree.configured, offline: offlineTree.offline, message: offlineTree.message }),
+      )
+      check(
+        '清单失败时 files 为空，不会误报远端内容',
+        Array.isArray(offlineTree.files) && offlineTree.files.length === 0,
+        JSON.stringify({ count: offlineTree.files?.length }),
+      )
+    } finally {
+      git(['remote', 'set-url', 'origin', reachableOrigin], WORKSPACE)
+    }
 
     // 本地未推送的修改不能被远端覆盖（参考项目只比远端 SHA 会覆盖，这里必须判冲突）
     writeFileSync(join(WORKSPACE, 'peer-new.md'), '# 本地又改了\n')

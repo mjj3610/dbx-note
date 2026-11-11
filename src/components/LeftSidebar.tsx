@@ -12,6 +12,7 @@ import { useSettingsStore } from '@/stores/settings'
 import { useUiStore, type SidebarTab } from '@/stores/ui'
 import { FileMoreMenu } from './FileMoreMenu'
 import { FileTree } from './FileTree'
+import { RemoteTreeAlert } from './RemoteTreeAlert'
 import { RecordPanel } from './RecordPanel'
 import { CanvasPanel } from './canvas/CanvasPanel'
 import { OutlinePanel } from './OutlinePanel'
@@ -35,6 +36,7 @@ export function LeftSidebar() {
   const [keyword, setKeyword] = useState('')
   const tree = useNotesStore((state) => state.tree)
   const loadTree = useNotesStore((state) => state.loadTree)
+  const refreshRemoteTree = useNotesStore((state) => state.refreshRemoteTree)
   const setRecordFilter = useRecordsStore((state) => state.setFilter)
   const loadRecords = useRecordsStore((state) => state.load)
   const fileView = useSettingsStore((state) => state.fileView)
@@ -137,7 +139,13 @@ export function LeftSidebar() {
           <Search className="pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-muted-foreground" />
           <input
             value={keyword}
-            onChange={(event) => setKeyword(event.target.value)}
+            onChange={(event) => {
+              const next = event.target.value
+              // 参考项目 `sidebar-search.tsx` 打开搜索时会先 loadRemoteSyncFiles()：
+              // 搜云端文件之前必须保证清单是最新的，否则远端新文件搜不到。
+              if (next && !keyword) void refreshRemoteTree()
+              setKeyword(next)
+            }}
             placeholder={t('sidebar.searchPlaceholder')}
             className="h-8 w-full rounded-md border border-border/70 bg-muted/30 pr-7 pl-7 text-xs outline-none transition-colors placeholder:text-muted-foreground/70 focus:border-ring/50 focus:bg-background"
           />
@@ -153,11 +161,15 @@ export function LeftSidebar() {
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-hidden">
-        {tab === 'files' ? <FileTree nodes={filteredTree} keyword={keyword.trim().toLowerCase()} /> : null}
-        {tab === 'records' ? <RecordPanel /> : null}
-        {tab === 'canvases' ? <CanvasPanel /> : null}
-        {tab === 'outline' ? <OutlinePanel /> : null}
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        {/* 对齐参考项目 `unified-sync-status`：清单失败常驻提示，不受文件树空态影响 */}
+        {tab === 'files' ? <RemoteTreeAlert /> : null}
+        <div className="min-h-0 flex-1 overflow-hidden">
+          {tab === 'files' ? <FileTree nodes={filteredTree} keyword={keyword.trim().toLowerCase()} /> : null}
+          {tab === 'records' ? <RecordPanel /> : null}
+          {tab === 'canvases' ? <CanvasPanel /> : null}
+          {tab === 'outline' ? <OutlinePanel /> : null}
+        </div>
       </div>
     </div>
   )

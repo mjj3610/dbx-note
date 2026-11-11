@@ -68,6 +68,24 @@ await page.keyboard.press('Enter')
 await page.keyboard.type('- 列表项 A')
 await page.waitForTimeout(1600)
 
+// 追加 H1~H6：大纲索引与「全级别点击定位」的回归数据。
+// 连按两次 Enter 退出任务列表，确保 # 输入规则在普通段落里生效。
+await page.locator('.ProseMirror').press('Control+End')
+await page.keyboard.press('Enter')
+await page.keyboard.press('Enter')
+for (const [level, label] of [
+  [1, '一级标题'],
+  [2, '二级标题B'],
+  [3, '三级标题'],
+  [4, '四级标题'],
+  [5, '五级标题'],
+  [6, '六级标题'],
+]) {
+  await page.keyboard.type(`${'#'.repeat(level)} ${label}`)
+  await page.keyboard.press('Enter')
+}
+await page.waitForTimeout(1600)
+
 // 校验磁盘落盘
 const workspaceDir = join(ROOT, '.tmp', 'dev-data', 'workspace')
 const filePath = join(workspaceDir, `${noteName}.md`)
@@ -93,7 +111,32 @@ await page.screenshot({ path: join(SHOTS, '03-records.png') })
 // 大纲：底栏也有同名「大纲」按钮，这里显式限定到左侧栏页签，避免 strict mode 歧义
 await page.locator('.sidebar-tabs').getByRole('button', { name: '大纲' }).click()
 await page.waitForTimeout(400)
+const outlinePanel = page.locator('[data-outline-panel]').first()
 check('大纲识别标题', (await page.locator('text=二级标题').count()) > 0)
+check('大纲走编辑器标题索引', (await page.locator('[data-outline-panel][data-outline-source="editor"]').count()) >= 1)
+for (const level of [1, 2, 3, 4, 5, 6]) {
+  check(`大纲包含 ${level} 级标题`, (await page.locator(`[data-outline-level="${level}"]`).count()) >= 1)
+}
+// 全级别快速定位：点击后选区必须落在对应层级的标题节点里。
+// 旧实现按「标题文本」精确匹配，二~六级标题常因 inline 语法 / 重复文本而失配。
+for (const [level, label, tag] of [
+  [1, '一级标题', 'H1'],
+  [2, '二级标题B', 'H2'],
+  [3, '三级标题', 'H3'],
+  [4, '四级标题', 'H4'],
+  [5, '五级标题', 'H5'],
+  [6, '六级标题', 'H6'],
+]) {
+  await outlinePanel.getByRole('button', { name: label, exact: true }).click()
+  await page.waitForTimeout(320)
+  const hit = await page.evaluate(() => {
+    const node = window.getSelection()?.anchorNode
+    const element = node instanceof HTMLElement ? node : node?.parentElement
+    const heading = element?.closest('h1,h2,h3,h4,h5,h6')
+    return heading ? { tag: heading.tagName, text: heading.textContent?.trim() ?? '' } : null
+  })
+  check(`点击 ${level} 级大纲可定位`, hit?.tag === tag && hit.text === label, JSON.stringify(hit))
+}
 check('编辑器底栏可见', await page.locator('[data-editor-footer]').isVisible())
 
 // 设置

@@ -32,6 +32,47 @@ export interface EditorTab {
   dirty: boolean
 }
 
+/** 远端目录清单拉取失败：供文件树状态条与设置页展示、重试 */
+export interface RemoteTreeFailure {
+  /** 后端返回的已脱敏原因；为空时由界面用 i18n 兜底文案 */
+  message: string
+  /** 实际生效的同步平台 */
+  provider: string
+  /** 失败时间戳 */
+  at: number
+}
+
+/**
+ * 清单拉取结果事件，对齐参考项目 `sync-directory-completed`
+ *
+ * 参考项目按目录逐个 emit；本项目后端一次 `git fetch` 拿全量清单，
+ * 因此一次刷新对应一个事件，`error` 为失败原因。
+ */
+export interface RemoteTreeEventDetail {
+  /** 参考项目按目录 emit；本项目一次拿全量清单，固定为根路径 '' */
+  path: string
+  success: boolean
+  provider: string
+  error?: string
+  at: number
+}
+
+export const REMOTE_TREE_EVENT = 'dbx:remote-tree-completed'
+
+/**
+ * 派发清单拉取结果，失败时同时写一条结构化日志。
+ *
+ * 调用示例：`emitRemoteTreeResult({ success: false, provider: 'gitee', error: '...', at: Date.now() })`
+ * 监听示例：`window.addEventListener(REMOTE_TREE_EVENT, (event) => console.log(event.detail.path))`
+ * `path` 由本函数补齐，调用方不必重复传根路径。
+ */
+function emitRemoteTreeResult(result: Omit<RemoteTreeEventDetail, 'path'>): void {
+  if (typeof window === 'undefined') return
+  if (!result.success) console.warn('[remoteTree] 云端文件清单拉取失败：', result.error)
+  const detail: RemoteTreeEventDetail = { path: '', ...result }
+  window.dispatchEvent(new CustomEvent(REMOTE_TREE_EVENT, { detail }))
+}
+
 interface NotesState {
   tree: TreeNode[]
   loadingTree: boolean
@@ -39,6 +80,8 @@ interface NotesState {
   remoteSyncing: boolean
   /** 最近一次成功合并远端清单的时间 */
   remoteTreeAt: number
+  /** 最近一次清单拉取失败；null 表示当前没有失败需要提示 */
+  remoteTreeFailure: RemoteTreeFailure | null
   expanded: string[]
   /** 打开的标签（按打开顺序） */
   tabs: EditorTab[]
@@ -52,9 +95,15 @@ interface NotesState {
   /** 最近一次打开失败的文件，用于界面提示 */
   lastError: string | null
 
-  loadTree: () => Promise<void>
+  /**
+   * 重读本地文件树；`skipRemoteSync` 用于刚拉过远端、只需重读本地盘的场合
+   * （对齐参考项目 `loadFileTree({ skipRemoteSync: true })`），避免重复 git fetch
+   */
+  loadTree: (options?: { skipRemoteSync?: boolean }) => Promise<void>
   /** 只拉远端目录清单并合并进现有文件树，不重读本地磁盘 */
   refreshRemoteTree: (options?: { force?: boolean }) => Promise<void>
+  /** 用户点「重试」：强制重拉一次，返回是否恢复 */
+  retryRemoteTree: () => Promise<boolean>
   /** `force` 用于「乐观接管」：activePath 已先切过去，仍要真正读一次盘 */
   open: (path: string, options?: { force?: boolean }) => Promise<void>
   /**
@@ -87,14 +136,17 @@ let saveTimer: number | undefined
 /** 远端清单请求代号：慢请求回来时不能覆盖更新一次的结果 */
 let remoteTreeGeneration = 0
 /**
- * 两次清单刷新的最小间隔
+ * 清单刷新期间又来了一次触发时排队补跑，而不是直接丢弃。
  *
- * 每次刷新 Git 通道都要 `git fetch`，回到前台、新建文件、切标签都会触发；
- * 不去重的话会在后台堆出一串 git 进程，把界面交互拖慢（e2e 里表现为
- * 设置表单 / 按钮偶发渲染超时）。参考项目的 loadRemoteSyncFiles 也是
- * 「进入文件页拉一次」，不是每次状态变化都拉。
+ * 参考项目 `loadRemoteSyncFiles()` 没有时间节流：进入文件页、展开目录、搜索、
+ * 新建 / 重命名 / 删除之后都会重新查一次远端，只用 generation 丢弃过期结果。
+ * 本版按此语义去掉了原先的 15 秒时间节流——否则「改完笔记点刷新」恰好落在
+ * 节流窗口里，用户会以为远端新文件永远拉不下来。
+ *
+ * 但同一时刻只允许一个 `git fetch` 在飞（避免后台堆 git 进程拖慢界面），
+ * 后来的触发记在这里，当前请求结束后立刻补跑一次。
  */
-const REMOTE_TREE_MIN_INTERVAL = 15_000
+let remoteTreeQueued = false
 
 /** 标签记忆存在 Sidecar 的 settings 表（宿主沙箱没有 localStorage） */
 const TABS_SETTING_KEY = 'app.tabs'
@@ -185,6 +237,7 @@ export const useNotesStore = create<NotesState>((set, get) => ({
   loadingTree: false,
   remoteSyncing: false,
   remoteTreeAt: 0,
+  remoteTreeFailure: null,
   expanded: [],
   tabs: [],
   activePath: '',
@@ -196,7 +249,7 @@ export const useNotesStore = create<NotesState>((set, get) => ({
   error: null,
   lastError: null,
 
-  loadTree: async () => {
+  loadTree: async (options) => {
     set({ loadingTree: true })
     try {
       const result = await rpc.readTree()
@@ -209,31 +262,61 @@ export const useNotesStore = create<NotesState>((set, get) => ({
     }
     // 参考项目在 loadFileTree() 末尾无条件异步执行 loadRemoteSyncFiles()，
     // 且不阻塞界面：这里同样只拉「目录清单」，不下载任何笔记正文。
-    void get().refreshRemoteTree()
+    // 显式 skipRemoteSync 的场景（刚下载完云端文件）只重读本地盘。
+    if (!options?.skipRemoteSync) void get().refreshRemoteTree()
   },
 
   /**
    * 拉取远端目录清单并合并进文件树
    *
    * 与参考项目 `loadRemoteSyncFiles()` 对齐：只合并元信息，仅云端节点显示出来，
-   * 点开时再下正文；离线 / 未配置同步时静默保留本地树，不打断使用。
+   * 点开时再下正文。失败时不再静默：记录 `remoteTreeFailure` 并派发结果事件，
+   * 由状态条展示原因 + 重试（参考项目 `sync-directory-completed` →
+   * `unified-sync-status` 的 failedDirectories / retrySync）。
+   * 「未配置同步」不算故障，保留本地树且不打扰用户。
    */
   refreshRemoteTree: async (options) => {
-    // 已有请求在飞：无论谁触发都跳过，绝不叠第二次 git fetch。
-    // 时间节流只作用于 loadTree 这类高频内部调用；用户切回前台（force）总能拉一次。
-    const now = Date.now()
-    const { remoteSyncing, remoteTreeAt } = get()
-    if (remoteSyncing) return
-    if (!options?.force && remoteTreeAt > 0 && now - remoteTreeAt < REMOTE_TREE_MIN_INTERVAL) return
+    // 已有请求在飞：记一笔待补跑，绝不叠第二次 git fetch。
+    // 参考项目用 generation 丢弃过期结果、每次触发都发请求；这里用「排队补跑」
+    // 达到同样的「不丢触发」效果，同时避免后台堆 git 进程。
+    if (get().remoteSyncing) {
+      remoteTreeQueued = true
+      return
+    }
+    // 用户显式重试会覆盖排队中的旧请求，避免重试刚完成又自动跑一次
+    if (options?.force) remoteTreeQueued = false
 
     const generation = ++remoteTreeGeneration
     set({ remoteSyncing: true })
     try {
       const snapshot = await rpc.syncRemoteTree()
+      // 慢请求回来时不能覆盖更新一次的结果，失败事件同样要遵守
       if (generation !== remoteTreeGeneration) return
-      if (!snapshot.configured || snapshot.offline) return
+
+      // 参考项目 isSyncConfigured() 为 false 时直接返回，不产生失败态
+      if (!snapshot.configured) {
+        set({ remoteTreeFailure: null })
+        return
+      }
+      if (snapshot.offline) {
+        const failure: RemoteTreeFailure = {
+          message: snapshot.message?.trim() ?? '',
+          provider: snapshot.provider,
+          at: Date.now(),
+        }
+        set({ remoteTreeFailure: failure })
+        emitRemoteTreeResult({
+          success: false,
+          provider: failure.provider,
+          error: failure.message,
+          at: failure.at,
+        })
+        return
+      }
+
       const tree = mergeRemoteTree(get().tree, snapshot.files)
-      set({ tree, remoteTreeAt: Date.now() })
+      set({ tree, remoteTreeAt: Date.now(), remoteTreeFailure: null })
+      emitRemoteTreeResult({ success: true, provider: snapshot.provider, at: Date.now() })
 
       // 清单已经 fetch 过一次，这里直接复用结果拉当前这篇，不再发第二次
       // compare / fetch。只对「本地未改、远端有新版本」生效，冲突仍交给弹窗。
@@ -243,11 +326,30 @@ export const useNotesStore = create<NotesState>((set, get) => ({
         await pullRemoteFileOnDemand(activePath)
         await get().reloadActive()
       }
-    } catch {
-      // 同步不可用不影响本地笔记，设置页里能看到具体原因
+    } catch (error) {
+      if (generation !== remoteTreeGeneration) return
+      const failure: RemoteTreeFailure = {
+        message: error instanceof Error ? error.message : String(error),
+        provider: '',
+        at: Date.now(),
+      }
+      set({ remoteTreeFailure: failure })
+      emitRemoteTreeResult({ success: false, provider: '', error: failure.message, at: failure.at })
     } finally {
-      if (generation === remoteTreeGeneration) set({ remoteSyncing: false })
+      if (generation === remoteTreeGeneration) {
+        set({ remoteSyncing: false })
+        if (remoteTreeQueued) {
+          remoteTreeQueued = false
+          void get().refreshRemoteTree()
+        }
+      }
     }
+  },
+
+  /** 状态条 / 设置页的「重试」入口：强制重拉一次并回报是否恢复 */
+  retryRemoteTree: async () => {
+    await get().refreshRemoteTree({ force: true })
+    return get().remoteTreeFailure === null
   },
 
   open: async (path, options) => {
@@ -271,7 +373,9 @@ export const useNotesStore = create<NotesState>((set, get) => ({
         // 参考项目 `pullMissingRemoteArticle()`：节点只存在于云端，本地磁盘没有，
         // 点开时先把这一个文件下下来。此路径不看 autoPullOnOpen 开关。
         await pullRemoteFileOnDemand(path)
-        void get().loadTree()
+        // 刚为这个文件 fetch 过一次，重读本地盘即可；再发一次清单请求纯属浪费。
+        // 对齐参考项目 `loadFileTree({ skipRemoteSync: true })` 的用法。
+        void get().loadTree({ skipRemoteSync: true })
       } else {
         const pulled = await pullOnOpen(path).catch(() => null)
         if (pulled?.conflict) {
@@ -505,9 +609,14 @@ export const useNotesStore = create<NotesState>((set, get) => ({
 
   toggleExpand: (path) => {
     const { expanded } = get()
+    const opening = !expanded.includes(path)
     set({
-      expanded: expanded.includes(path) ? expanded.filter((item) => item !== path) : [...expanded, path],
+      expanded: opening ? [...expanded, path] : expanded.filter((item) => item !== path),
     })
+    // 参考项目 `loadCollapsibleFiles()` 展开目录时会 `loadFolderRemoteFiles(fullpath)`，
+    // 即使子内容已缓存也会重查该目录的远端状态。本项目清单是全量的，
+    // 展开时重拉一次即可覆盖「远端在我展开之后才新增文件」的场景。
+    if (opening) void get().refreshRemoteTree()
   },
 
   collapseAll: () => set({ expanded: [] }),
