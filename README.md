@@ -344,7 +344,7 @@ SQLite 表：`settings`、`records`、`tags`、`record_tags`、`chats`、`messag
 | 后端单元测试 | `cargo test --bin backend` **27 / 0**（v0.5.9 新增 3 条图谱单测，另含 1 条真实 Git 仓库集成用例）；`cargo check` 通过（1 条既存 `dead_code` 警告） |
 | 本地产物说明 | v0.5.9 已在 `backend/` 目录内 `cargo build --release` 重建 release Sidecar（4m44s，4,471,296 B）并重新构建前端，生成可安装的 `.dbxp`；从**包内解出的** Sidecar 用 `DBX_NOTE_BACKEND` 跑 `sidecar-check` 得 **214 / 0**、握手版本 `0.5.9`；CI 的 5 平台矩阵仍只负责正式发布产物 |
 | 产物 | 本地安装包 `release/com.mjj3610.note-0.5.8-windows-x64.dbxp`（3,911,385 B，sha256 `7f2fe5922127d93162a1291d2063e9e167c438e0154c68fbb2e91994f124f716`）已包含大纲修复并重新校验（12/12 checksums、Sidecar 字节一致）。**v0.5.8 已发布**：Release https://github.com/mjj3610/dbx-note/releases/tag/v0.5.8 ，5 平台 CI run `42956095802` **attempt 1 全绿**，商店候选 https://github.com/t8y2/dbx-store/pull/501 等待维护者 `/sign`；上游已上架 v0.5.7（PR #498 已签名合并） |
-| v0.5.9（dev 分支） | 知识图谱已在 `dev` 分支完成 1~4 阶段实现与回归，版本号统一升到 `0.5.9`；本地安装包 `release/com.mjj3610.note-0.5.9-windows-x64.dbxp`（**3,946,626 B / sha256 `fbd55dffdfcfb84b44fc3c12963278b9b6459c580e4bc71d9bcf98db2bff2998`**），包校验 **14/0**、包内 Sidecar 协议自检 **214/0**。**未打 tag、未发 Release、未跑 5 平台 CI、未提商店候选 PR**；设计与发布边界见 `docs/知识图谱设计-v0.5.9.md` / `docs/release-notes-v0.5.9.md` / `docs/版本部署变更说明-v0.5.9.md` |
+| v0.5.9 | 知识图谱 1~4 阶段完成，版本号统一 `0.5.9`；`dev` 已合并 `main`，**tag / Release / 5 平台 CI / 商店候选 PR 已推进，等待维护者 `/sign`**。本地安装包 `release/com.mjj3610.note-0.5.9-windows-x64.dbxp`（**3,946,626 B / sha256 `fbd55dffdfcfb84b44fc3c12963278b9b6459c580e4bc71d9bcf98db2bff2998`**），包校验 **14/0**、包内 Sidecar 协议自检 **214/0**。设计与发布记录见 `docs/知识图谱设计-v0.5.9.md` / `docs/release-notes-v0.5.9.md` / `docs/版本部署变更说明-v0.5.9.md` / `store-submission/PUBLISH.md` |
 
 截图链路除了功能断言，还有一条**像素级自检**：`screenshot/window` 返回的
 `pixels.inside` / `pixels.outside` 分别核对「选区内是否 1:1 原像素」「选区外是否压暗」，

@@ -1,8 +1,9 @@
-# v0.5.9 发布说明（dev 分支 / 知识图谱）
+# v0.5.9 发布说明（知识图谱）
 
-> **发布边界**：本版只在 `dev` 分支实现与验证，**未打 tag、未发 Release、未提交商店候选 PR**。
-> 上游已上架版本仍为 v0.5.7，v0.5.8 候选 PR #501 仍在等待维护者 `/sign`。
-> 已额外补做本机 release Sidecar 构建与可安装 `.dbxp` 验证（见 5.1），**仍属未发布**。
+> **发布状态**：`dev` 已合并 `main`，`v0.5.9` tag / 非 draft Release 与 5 平台 CI 产物已用于商店候选；
+> 候选 PR 需维护者 `/sign` 后才会真正上架。CI run / PR 号 / 指纹见 `store-submission/PUBLISH.md`。
+> 发布前核对：上游已上架 v0.5.8（#501 已 `/sign` 合并，`latestVersion=0.5.8`），本插件 open 候选 0 个。
+> 本机 release Sidecar 与可安装 `.dbxp` 验证见 5.1。
 > 详细设计见 `docs/知识图谱设计-v0.5.9.md`，部署 / 回滚见 `docs/版本部署变更说明-v0.5.9.md`。
 
 ## 1. 需求
@@ -105,9 +106,15 @@
 | 测试 | `scripts/sidecar-check.mjs`、`scripts/smoke.mjs`、`scripts/e2e.mjs` |
 | 版本 / 文档 | `package.json`、`package-lock.json`、`manifest.json`、`docs/知识图谱设计-v0.5.9.md`、`docs/release-notes-v0.5.9.md`、`docs/版本部署变更说明-v0.5.9.md`、`README.md` |
 
-## 7. 未做的事（按用户要求）
+## 7. 发布链路与剩余事项
 
-- 未创建 `v0.5.9` tag；
-- 未创建 GitHub Release、未跑 5 平台 CI；
-- 未生成商店候选 JSON、未向 `t8y2/dbx-store` 提 PR；
-- 未改动 `.dbx-store.json` / `store-submission/PUBLISH.md` 里 v0.5.8 的已发布信息。
+| 步骤 | 状态 |
+| --- | --- |
+| `dev` → `main` 合并（以远端 main tree 为基准精确覆盖，30 改 / 0 删） | 已完成 |
+| `v0.5.9` tag + 非 draft Release | 已完成 |
+| 5 平台 CI 全绿 + `release-candidates.json` | 见 `store-submission/PUBLISH.md` |
+| 5 平台商店候选 JSON + 候选 PR | 见 `store-submission/PUBLISH.md`，**等待维护者 `/sign`** |
+| 上游 `latestVersion` 变为 `0.5.9` | 签名合并后由商店工作流写入 `plugins/` 与 `catalog/` |
+
+发布前守卫：#501 已 `/sign` 合并、上游 `latestVersion=0.5.8`、本插件 open 候选 0 个，
+因此**没有关闭任何旧 PR**（避免重演 0.4.0 误关正在签名候选的事故）。
