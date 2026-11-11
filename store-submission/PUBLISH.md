@@ -4,31 +4,64 @@
 
 | 项 | 值 |
 | --- | --- |
-| 已上架版本 | `com.mjj3610.note` **v0.5.7**（维护者 `t8y2` 在 #498 评论 `/sign`，签名工作流 run `42954504190` success，PR 于 2026-11-11T03:47:48Z 合并；上游 `plugins/` 与 `catalog/` 的 `latestVersion` 均为 `0.5.7`） |
-| 待签名候选 | **v0.5.8** → https://github.com/t8y2/dbx-store/pull/501 （open，分支 `add-com.mjj3610.note-0.5.8`，diff 仅 `candidates/com.mjj3610.note.json` +59 行） |
+| 已上架版本 | `com.mjj3610.note` **v0.5.8**（维护者 `t8y2` 在 #501 评论 `/sign`，PR 于 2026-11-11T05:01:17Z 合并；上游 `plugins/com.mjj3610.note.json` 与 `catalog/index.json` 的 `latestVersion` 均为 `0.5.8`，`versions` 含 0.5.0 / 0.5.4 / 0.5.7 / 0.5.8） |
+| 待签名候选 | **v0.5.9** → https://github.com/t8y2/dbx-store/pull/507 （open，分支 `add-com.mjj3610.note-0.5.9`，diff 仅 `candidates/com.mjj3610.note.json` +59 行） |
 | 候选包 | 5 个平台，见下表 |
-| 源码 | https://github.com/mjj3610/dbx-note/tree/v0.5.8 |
-| Release | https://github.com/mjj3610/dbx-note/releases/tag/v0.5.8 （CI run **42956095802**，**attempt 1 即 completed / success**，6 个 assets = 5 个 `.dbxp` + `release-candidates.json`） |
-| PR 校验 | #501 的 `validate` 为 failure 属**签名前预期**：唯一错误是 `Catalog contains 1 open candidate(s) awaiting DBX Store signing: com.mjj3610.note@0.5.8`；check-run 里其余都是 localization warning。维护者 `/sign` 后写入 `plugins/` 与 `catalog/` 即会通过 |
-| 旧 PR | #469（0.5.0）、#487（0.5.4）、**#498（0.5.7）** 已签名合并；#484（0.5.2）、#486（0.5.3）、#490（0.5.5）、#493（0.5.6）复核后已关闭未合并。提 #501 前重新查过上游 open PR，**无本插件 open 候选** |
-| 待办 | 等维护者审核 #501 并评论 `/sign`；签名合并后把本表「已上架版本」改成 0.5.8 |
+| 源码 | https://github.com/mjj3610/dbx-note/tree/v0.5.9 （`dev` 已合并 `main`） |
+| Release | https://github.com/mjj3610/dbx-note/releases/tag/v0.5.9 （CI run **43040620365**，**attempt 1 即 completed / success**，6 个 assets = 5 个 `.dbxp` + `release-candidates.json`） |
+| PR 校验 | #507 的 `validate` 为 failure 属**签名前预期**：唯一错误是 `Catalog contains 1 open candidate(s) awaiting DBX Store signing: com.mjj3610.note@0.5.9`；本地用上游 main 副本跑 `scripts/validate.mjs` 得 `Validated 102 plugin metadata file(s)` 后仅报该错，其余都是 localization warning。维护者 `/sign` 后写入 `plugins/` 与 `catalog/` 即会通过 |
+| 旧 PR | #469（0.5.0）、#487（0.5.4）、#498（0.5.7）、**#501（0.5.8）** 已签名合并；#484（0.5.2）、#486（0.5.3）、#490（0.5.5）、#493（0.5.6）复核后已关闭未合并。提 #507 前重新查过 #501 状态与上游 open PR：**#501 已合并、本插件 open 候选 0 个**，因此没有关闭任何旧 PR |
+| 待办 | 等维护者审核 #507 并评论 `/sign`；签名合并后把本表「已上架版本」改成 0.5.9 |
 
 候选包指纹（全部来自 CI 的 `release-candidates.json`，未签名）：
 
 | target | sha256 | size |
 | --- | --- | --- |
-| `windows-x64` | `23561fde22a298edd776683df54625c364ee62d473d978576e8a07f74447e87a` | 3,916,617 |
-| `darwin-arm64` | `725689850ab0fdeadf1f943b62a005e468ffccc6fc150aec8fc3a57b73fc6a2d` | 3,710,913 |
-| `darwin-x64` | `81ec4dfb1639742fb4fce8ff8a996cf48c0b3e4e9c44a2b22336f5477960c8a1` | 3,860,770 |
-| `linux-arm64` | `3ec9b0238e4f0efbcbb55d9a720ce08608b8cf5c75cf04a31d1b43ccce19b16d` | 3,787,705 |
-| `linux-x64` | `4ed29fe756ed7df6bbb34228c5ec64306ec66297f7868d6bec19bb460efdf0b8` | 3,861,188 |
+| `darwin-arm64` | `0a6df70e92bfbb649d2417d7bbe86f920cc63979e7ec3cecbe46f5e8f42a817a` | 3,746,303 |
+| `darwin-x64` | `e2b933c86bbd2b7ef4e61a2155ce3150d0c62944844abaaed319a90aea1add04` | 3,900,672 |
+| `linux-arm64` | `a4b1e566e0b166956bad2b16e9833184569500a17d57740ff99700e71d5d2e70` | 3,825,921 |
+| `linux-x64` | `8724de861673ca1f08148e45135b20c9105b322c9713d0c1e2f916999c879e13` | 3,903,037 |
+| `windows-x64` | `f5c6fad2a800b7c20be6977a072f74fd1fbc91186c9fc0b0f5f697db9b5cb171` | 3,955,557 |
 
-（上一版 0.5.7 的候选 #498 已签名合并，其指纹已写入上游 `plugins/com.mjj3610.note.json`；
+（上一版 0.5.8 的候选 #501 已签名合并，其指纹已写入上游 `plugins/com.mjj3610.note.json`；
+0.5.7 的指纹见 `git show 75b46a0:store-submission/PUBLISH.md`，其 PR #498 已签名合并；
 0.5.6 的指纹见 `git show a91b986:store-submission/PUBLISH.md`，其 PR #493 已关闭未合并；
 0.5.5 的指纹见 `git show 767fbe5:store-submission/PUBLISH.md`，其 PR #490 已关闭未合并；
 0.5.4 的指纹见 `git show 6b99320:store-submission/PUBLISH.md`，其 PR #487 已签名合并；
 0.5.3 指纹见 `git show 2aac00e:store-submission/PUBLISH.md`，其 PR #486 已关闭未合并；
 0.5.2 指纹见 `git show 0cc03ef:store-submission/PUBLISH.md`。）
+
+### v0.5.9 发布要点
+
+- 用户先要求评估 wiki 知识图谱的可行性 / 兼容性 / 性能，第一版「扫 Markdown 链接 + 侧栏小图」被否；
+  明确改为「基于知识库向量化结果生成 / 发现 / 刷新，点图谱在中间大区显示并与知识块联动」。
+  第二版设计（见 `docs/知识图谱设计-v0.5.9.md`）确定：图谱 = 向量库**只读派生视图**。
+- 用户要求「创建 dev 代码分支，进行 1-4 阶段实现，先不进行商店候选 PR」：本地 main 停在 `75b46a0`，
+  工作区带 v0.5.8 全量改动 → 建 `dev` 后先提交基线 `0e4c294`，再叠加 4 阶段实现（`0ecdab9`）。
+  期间补 release Sidecar 构建与本地 `.dbxp`（3,946,626 B，sha256 `fbd55dff…bff2998`），
+  包校验 **14/0**、包内 Sidecar 协议自检 **214/0**。
+- **本地安装「无响应」排查**：宿主 `versions/` 只有 0.5.6 / 0.5.8，最新激活记录是 0.5.8，
+  `sidecar.log` 最后一次 Sidecar 启动仍是 `version=0.5.8`；0.5.9 包与已装 0.5.8 的 manifest
+  逐字段只差 `version`，13 文件 / 12 条 checksums 一致，排除包本身。根因是 DBX 便携版
+  **未注册 `.dbxp` 文件关联**（`HKCR\.dbxp` 与 `UserChoice` 均为空），双击 / 点文件卡片不会触发安装，
+  正确入口是「DBX → 插件管理 → 从本地安装」。宿主退出后按它自己的格式增量落盘
+  `versions/0.5.9/` + `activations/…36-….json`，落盘 Sidecar 握手 `0.5.9` 通过；两项均可删，回退即回 0.5.8。
+- **发布前守卫**：重查 #501 发现已被 `/sign` 并合并（2026-11-11T05:01:17Z），上游 `latestVersion=0.5.8`、
+  本插件 open 候选 0 个 → **没有关闭任何旧 PR**，避免重演 0.4.0 误关正在签名候选的事故。
+- **合并方式**：本机 `git push` 经代理不通且远端 main（`2bb46a2`）领先本地基线，
+  改用 `.tmp/api-push-059.mjs` 以远端 main tree 为 `base_tree`、按两边 git blob sha 逐文件精确比对：
+  第一轮 **30 改 / 0 删 / 175 未变** → `971bbdf`；发布文档与 `.dbx-store.json` 更新后第二轮 → `c4ad7b6`。
+  本地用 `git branch -f main dev` 快进（期间清掉一次 checkout 中断留下的陈旧 `.git/index.lock`）。
+  第二轮出现 12 个 LF/CRLF 行尾造成的 blob sha 伪差异，内容与上一轮相同，0 删除，不影响 CI。
+- 回归：`cargo test --bin backend` **27/0** / `typecheck` 0 错误 / `build` ✓ / `sidecar-check` **214/0** /
+  `smoke` **34/0** / `e2e` **351 通过 / 1 失败**（唯一失败为锁屏 / 远程会话导致的全局截图环境项）。
+- 发布链路：`.tmp/release-api-056.mjs v0.5.9` 建 tag / 非 draft Release →
+  CI run **43040620365 attempt 1 success**（5 平台 Build + Publish assets 共 6 job 全绿）→
+  `.tmp/fetch-candidates-059.mjs` 取 5 平台指纹 → `.tmp/make-candidate-059.mjs` 拉上游 main 副本生成候选 →
+  `scripts/validate.mjs` 得 `Validated 102 plugin metadata file(s)`，唯一错误为预期等签名 →
+  `.tmp/store-pr-059.mjs` 提 **#507**。
+- 注意：Git Bash 的 `tar` 会把 `G:\\...` 解析成 `host:path`（`Cannot connect to G: resolve failed`），
+  脚本里外部命令一律用相对路径 + 显式 `cwd`。
 
 ### v0.5.8 发布要点
 

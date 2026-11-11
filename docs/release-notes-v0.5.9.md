@@ -1,7 +1,9 @@
 # v0.5.9 发布说明（知识图谱）
 
-> **发布状态**：`dev` 已合并 `main`，`v0.5.9` tag / 非 draft Release 与 5 平台 CI 产物已用于商店候选；
-> 候选 PR 需维护者 `/sign` 后才会真正上架。CI run / PR 号 / 指纹见 `store-submission/PUBLISH.md`。
+> **发布状态**：`dev` 已合并 `main`；Release https://github.com/mjj3610/dbx-note/releases/tag/v0.5.9 ，
+> CI run `43040620365` **attempt 1 全绿**（5 平台 Build + Publish assets 共 6 job），
+> 商店候选 https://github.com/t8y2/dbx-store/pull/507 （open，**等待维护者 `/sign`**）。
+> 5 平台指纹与完整发布记录见 `store-submission/PUBLISH.md`。
 > 发布前核对：上游已上架 v0.5.8（#501 已 `/sign` 合并，`latestVersion=0.5.8`），本插件 open 候选 0 个。
 > 本机 release Sidecar 与可安装 `.dbxp` 验证见 5.1。
 > 详细设计见 `docs/知识图谱设计-v0.5.9.md`，部署 / 回滚见 `docs/版本部署变更说明-v0.5.9.md`。
@@ -112,8 +114,8 @@
 | --- | --- |
 | `dev` → `main` 合并（以远端 main tree 为基准精确覆盖，30 改 / 0 删） | 已完成 |
 | `v0.5.9` tag + 非 draft Release | 已完成 |
-| 5 平台 CI 全绿 + `release-candidates.json` | 见 `store-submission/PUBLISH.md` |
-| 5 平台商店候选 JSON + 候选 PR | 见 `store-submission/PUBLISH.md`，**等待维护者 `/sign`** |
+| 5 平台 CI 全绿 + `release-candidates.json` | run `43040620365` attempt 1 success，6 个 assets |
+| 5 平台商店候选 JSON + 候选 PR | #507 open，diff 单文件 `candidates/com.mjj3610.note.json` +59 行，**等待维护者 `/sign`** |
 | 上游 `latestVersion` 变为 `0.5.9` | 签名合并后由商店工作流写入 `plugins/` 与 `catalog/` |
 
 发布前守卫：#501 已 `/sign` 合并、上游 `latestVersion=0.5.8`、本插件 open 候选 0 个，
