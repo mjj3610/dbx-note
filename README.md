@@ -343,7 +343,7 @@ SQLite 表：`settings`、`records`、`tags`、`record_tags`、`chats`、`messag
 | `node scripts/ui-probe-840.mjs` | 31 通过 / 0 失败（本版未重跑，历史结果） |
 | 后端单元测试 | `cargo test --bin backend` **24 / 0**（含新增「清单失败文案脱敏」单测，以及 1 条真实 Git 仓库集成用例）；`cargo check` 通过（1 条既存 `dead_code` 警告） |
 | 本地产物说明 | 本机 `cargo build --release`（`lto = true`）已在 `backend/` 目录内增量重建成功（2m08s），并用它生成可安装的 `.dbxp`；本地协议 / 界面回归使用新编译的 debug Sidecar（`DBX_NOTE_BACKEND` 指向 `backend/target/debug/backend.exe`）；CI 的 5 平台矩阵仍负责正式发布产物 |
-| 产物 | 本地安装包 `release/com.mjj3610.note-0.5.8-windows-x64.dbxp`（3,911,385 B，sha256 `7f2fe5922127d93162a1291d2063e9e167c438e0154c68fbb2e91994f124f716`）已包含大纲修复并重新校验（12/12 checksums、Sidecar 字节一致）；上一版 `v0.5.7` 的 5 平台矩阵 CI run `42823213363` 一次通过；Release https://github.com/mjj3610/dbx-note/releases/tag/v0.5.7 ，商店候选 https://github.com/t8y2/dbx-store/pull/498 等待维护者 `/sign`。v0.5.8 尚未发布 |
+| 产物 | 本地安装包 `release/com.mjj3610.note-0.5.8-windows-x64.dbxp`（3,911,385 B，sha256 `7f2fe5922127d93162a1291d2063e9e167c438e0154c68fbb2e91994f124f716`）已包含大纲修复并重新校验（12/12 checksums、Sidecar 字节一致）。**v0.5.8 已发布**：Release https://github.com/mjj3610/dbx-note/releases/tag/v0.5.8 ，5 平台 CI run `42956095802` **attempt 1 全绿**，商店候选 https://github.com/t8y2/dbx-store/pull/501 等待维护者 `/sign`；上游已上架 v0.5.7（PR #498 已签名合并） |
 
 截图链路除了功能断言，还有一条**像素级自检**：`screenshot/window` 返回的
 `pixels.inside` / `pixels.outside` 分别核对「选区内是否 1:1 原像素」「选区外是否压暗」，

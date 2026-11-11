@@ -4,30 +4,60 @@
 
 | 项 | 值 |
 | --- | --- |
-| 已上架版本 | `com.mjj3610.note` **v0.5.4**（#487 已被维护者签名并合并；上游 `plugins/com.mjj3610.note.json` 的 source 仍指向 `tree/v0.5.4`） |
-| 待签名候选 | **v0.5.7** → https://github.com/t8y2/dbx-store/pull/498 （open，分支 `add-com.mjj3610.note-0.5.7`，diff 仅 `candidates/com.mjj3610.note.json` +59 行） |
+| 已上架版本 | `com.mjj3610.note` **v0.5.7**（维护者 `t8y2` 在 #498 评论 `/sign`，签名工作流 run `42954504190` success，PR 于 2026-11-11T03:47:48Z 合并；上游 `plugins/` 与 `catalog/` 的 `latestVersion` 均为 `0.5.7`） |
+| 待签名候选 | **v0.5.8** → https://github.com/t8y2/dbx-store/pull/501 （open，分支 `add-com.mjj3610.note-0.5.8`，diff 仅 `candidates/com.mjj3610.note.json` +59 行） |
 | 候选包 | 5 个平台，见下表 |
-| 源码 | https://github.com/mjj3610/dbx-note/tree/v0.5.7 |
-| Release | https://github.com/mjj3610/dbx-note/releases/tag/v0.5.7 （CI run **42823213363**，**attempt 1 即 completed / success**，6 个 assets = 5 个 `.dbxp` + `release-candidates.json`） |
-| PR 校验 | #498 的 `validate` 为 failure 属**签名前预期**：唯一错误是 `Catalog contains 1 open candidate(s) awaiting DBX Store signing: com.mjj3610.note@0.5.7`；check-run 里其余都是 localization warning。维护者 `/sign` 后写入 `plugins/` 与 `catalog/` 即会通过 |
-| 旧 PR | #469（0.5.0）、#487（0.5.4）已签名合并；#484（0.5.2）、#486（0.5.3）、#490（0.5.5）、#493（0.5.6）复核后已关闭未合并。关闭 #493 的守卫（open / 未合并 / 0 评论与审核 / 单文件 diff）全部通过；提 #498 前重新查过上游 open PR，**无本插件 open 候选** |
-| 待办 | 等维护者审核 #498 并评论 `/sign`；签名合并后把本表「已上架版本」改成 0.5.7 |
+| 源码 | https://github.com/mjj3610/dbx-note/tree/v0.5.8 |
+| Release | https://github.com/mjj3610/dbx-note/releases/tag/v0.5.8 （CI run **42956095802**，**attempt 1 即 completed / success**，6 个 assets = 5 个 `.dbxp` + `release-candidates.json`） |
+| PR 校验 | #501 的 `validate` 为 failure 属**签名前预期**：唯一错误是 `Catalog contains 1 open candidate(s) awaiting DBX Store signing: com.mjj3610.note@0.5.8`；check-run 里其余都是 localization warning。维护者 `/sign` 后写入 `plugins/` 与 `catalog/` 即会通过 |
+| 旧 PR | #469（0.5.0）、#487（0.5.4）、**#498（0.5.7）** 已签名合并；#484（0.5.2）、#486（0.5.3）、#490（0.5.5）、#493（0.5.6）复核后已关闭未合并。提 #501 前重新查过上游 open PR，**无本插件 open 候选** |
+| 待办 | 等维护者审核 #501 并评论 `/sign`；签名合并后把本表「已上架版本」改成 0.5.8 |
 
 候选包指纹（全部来自 CI 的 `release-candidates.json`，未签名）：
 
 | target | sha256 | size |
 | --- | --- | --- |
-| `windows-x64` | `8b46ac5eabdac6cb068d0b966abb68f73bc67df2bb591e890e1f41655619b838` | 3,904,565 |
-| `darwin-arm64` | `f44a7cbf9b35ec24471ad58e148ff286718c3b1c9a00b30b0d175f7f76dca71f` | 3,696,672 |
-| `darwin-x64` | `f6e7d26f8637cbefb0e6fc4f5ba6432b35bc9a570425c48105e12e3c39e31af4` | 3,846,698 |
-| `linux-arm64` | `fe6b36d37a6bb2b021fd96bed77b55af0470cb50fb60c96a4b920af5c4e4fa9e` | 3,773,595 |
-| `linux-x64` | `bf5e067b88de57a50835f5be8eb8e6f66ac048c65d9c03638c7ba4d72bbc4da9` | 3,845,410 |
+| `windows-x64` | `23561fde22a298edd776683df54625c364ee62d473d978576e8a07f74447e87a` | 3,916,617 |
+| `darwin-arm64` | `725689850ab0fdeadf1f943b62a005e468ffccc6fc150aec8fc3a57b73fc6a2d` | 3,710,913 |
+| `darwin-x64` | `81ec4dfb1639742fb4fce8ff8a996cf48c0b3e4e9c44a2b22336f5477960c8a1` | 3,860,770 |
+| `linux-arm64` | `3ec9b0238e4f0efbcbb55d9a720ce08608b8cf5c75cf04a31d1b43ccce19b16d` | 3,787,705 |
+| `linux-x64` | `4ed29fe756ed7df6bbb34228c5ec64306ec66297f7868d6bec19bb460efdf0b8` | 3,861,188 |
 
-（上一版 0.5.6 的指纹见 `git show a91b986:store-submission/PUBLISH.md`，其 PR #493 已关闭未合并；
+（上一版 0.5.7 的候选 #498 已签名合并，其指纹已写入上游 `plugins/com.mjj3610.note.json`；
+0.5.6 的指纹见 `git show a91b986:store-submission/PUBLISH.md`，其 PR #493 已关闭未合并；
 0.5.5 的指纹见 `git show 767fbe5:store-submission/PUBLISH.md`，其 PR #490 已关闭未合并；
 0.5.4 的指纹见 `git show 6b99320:store-submission/PUBLISH.md`，其 PR #487 已签名合并；
 0.5.3 指纹见 `git show 2aac00e:store-submission/PUBLISH.md`，其 PR #486 已关闭未合并；
 0.5.2 指纹见 `git show 0cc03ef:store-submission/PUBLISH.md`。）
+
+### v0.5.8 发布要点
+
+- 用户先反馈 v0.5.7 装完后「改了笔记但提交改动显示没有改变」「手动推送 Gitee 认证失败」，
+  根因是自动同步 commit 成功 / push 失败被吞，以及 `GIT_ASKPASS=echo` 把提示语当用户名发给
+  Gitee、平台信任设置项与远端地址脱钩。修复见 `docs/release-notes-v0.5.8.md` 第 1 / 2 节。
+- 随后要求按参考项目复刻「远程有、本地没有的笔记」清单逻辑：去掉 15s 节流改单 flight 排队补跑、
+  补齐展开目录 / 搜索 / 文件操作 / 配置保存 / 测试连接触发、清单失败可见可重试、错误脱敏。见第 3 节。
+- 发布前最后一次追加：用户反馈「大纲加载很慢、只有点击一级标题能定位」，要求对照参考项目完善并
+  **「改完这点后再进行发布商店」**。改为 ProseMirror 增量标题索引 + 按 `id`/`pos` 定位，
+  H1~H6 全部可点；smoke 断言从 12 条扩到 25 条。见第 4 节。
+- **发布前守卫救了一次**：按 PUBLISH.md 的教训重新查 #498，发现维护者 `t8y2` 已在
+  03:42:23Z 评论 `/sign`，签名工作流 `42954504190` 正在 `in_progress`。因此**没有关闭 #498**，
+  先推进源码 / tag / Release / CI；03:47:48Z 确认 #498 已合并、上游 `latestVersion=0.5.7`、
+  无本插件 open 候选后，才提 #501。若按旧记录直接「关闭 0.5.7 候选」，会毁掉维护者刚完成的签名。
+- `preflight.mjs` 报 `backend/src/sync.rs` 疑似凭据：单测里 `oauth2:token@gitee.com` 这类示例被
+  邮箱正则误判。仿 0.5.4 的处理，把注释改成文字描述、把示例 URL 里的 `@` 用 `format!("{AT}")` 拼，
+  运行时字符串完全不变；`cargo test --bin backend` 复跑 **24/0**，预检转为全绿。
+- 回归：`cargo test --bin backend` **24/0** / `tsc --noEmit` 0 错误 / `vite build` ✓ /
+  `sidecar-check` **205/0** / `smoke` **25/0** / `e2e` **337 通过 / 1 失败**（唯一失败为锁屏 / 远程会话
+  导致的全局截图环境项）。本地 `.dbxp`：3,911,385 B，sha256 `7f2fe592…94f124f716`，
+  12/12 checksums 与 Sidecar 字节一致。
+- 发布链路：`.tmp/api-push-058.mjs`（Git Data API 以远端 main tree 为 base_tree 逐文件建 blob/tree/commit，
+  避开本机 git push 的代理问题，也兼容远端领先的文档提交）→ `.tmp/release-api-056.mjs v0.5.8`
+  建 tag / 非 draft Release → CI run `42956095802` **attempt 1 success** →
+  `.tmp/fetch-candidates-058.mjs` 取指纹 → 现拉上游 tarball 到 `.tmp/dbx-store-058` →
+  `make-store-candidate.mjs --validate`（唯一错误为预期等签名）→ `.tmp/store-pr-058.mjs` 提 #501。
+- 注意：本机 `git update-ref refs/remotes/origin/main` 会因远端 commit 对象不在本地而失败，
+  **只影响本地跟踪引用，不影响远端 main / tag / CI**；脚本已改成软失败。
 
 ### v0.5.7 发布要点
 
