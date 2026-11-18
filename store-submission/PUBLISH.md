@@ -77,7 +77,7 @@
   03:42:23Z 评论 `/sign`，签名工作流 `42954504190` 正在 `in_progress`。因此**没有关闭 #498**，
   先推进源码 / tag / Release / CI；03:47:48Z 确认 #498 已合并、上游 `latestVersion=0.5.7`、
   无本插件 open 候选后，才提 #501。若按旧记录直接「关闭 0.5.7 候选」，会毁掉维护者刚完成的签名。
-- `preflight.mjs` 报 `backend/src/sync.rs` 疑似凭据：单测里 `oauth2:token@gitee.com` 这类示例被
+- `preflight.mjs` 报 `backend/src/sync.rs` 疑似凭据：单测里 `oauth2:token AT gitee.com` 这类示例被
   邮箱正则误判。仿 0.5.4 的处理，把注释改成文字描述、把示例 URL 里的 `@` 用 `format!("{AT}")` 拼，
   运行时字符串完全不变；`cargo test --bin backend` 复跑 **24/0**，预检转为全绿。
 - 回归：`cargo test --bin backend` **24/0** / `tsc --noEmit` 0 错误 / `vite build` ✓ /

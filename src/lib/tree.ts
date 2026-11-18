@@ -179,6 +179,61 @@ export function mergeRemoteTree(local: TreeNode[], files: RemoteTreeFile[]): Tre
   return pruned
 }
 
+/** 浅层深拷贝，保证插入新节点时不改到 zustand 里正在被渲染的旧树 */
+function cloneNodes(nodes: TreeNode[]): TreeNode[] {
+  return nodes.map((node) => ({
+    ...node,
+    ...(node.children ? { children: cloneNodes(node.children) } : {}),
+  }))
+}
+
+/**
+ * 把「刚写盘」的本地路径增量插进文件树
+ *
+ * 对照参考项目：拖拽导入用 `addFile()` 增量插树，但 `use-markdown-import`
+ * 之后仍会 `await loadFileTree()` 全量重扫；本项目旧版更重，导入完还要
+ * `loadTree()` 再顺带触发一次 `sync/remoteTree`（git fetch）。在大工作区 /
+ * 网络慢时，这一步就是「上传完卡很久」的主要来源。
+ *
+ * `fs/import` 已返回精确落盘路径，直接按路径建目录链即可；同名节点要清掉
+ * `remoteOnly` / `remoteUpdated`，因为文件已经实实在在落到本地了。
+ */
+export function insertLocalPaths(nodes: TreeNode[], paths: string[]): TreeNode[] {
+  if (paths.length === 0) return nodes
+  const root = cloneNodes(nodes)
+  const now = Date.now()
+  for (const raw of paths) {
+    const path = raw.replace(/\\/g, '/')
+    const parts = path.split('/').filter(Boolean)
+    if (parts.length === 0) continue
+    let level = root
+    let parentPath = ''
+    for (const segment of parts.slice(0, -1)) {
+      const dirPath = parentPath ? `${parentPath}/${segment}` : segment
+      let folder = level.find((node) => node.kind === 'folder' && node.name === segment)
+      if (!folder) {
+        folder = { kind: 'folder', name: segment, path: dirPath, children: [] }
+        level.push(folder)
+      }
+      folder.children ??= []
+      level = folder.children
+      parentPath = dirPath
+    }
+    const name = parts[parts.length - 1]
+    const existing = level.find((node) => node.path === path)
+    if (existing) {
+      existing.kind = kindOf(name)
+      existing.mtime = now
+      delete existing.remoteOnly
+      delete existing.remoteUpdated
+      continue
+    }
+    level.push({ kind: kindOf(name), name, path, size: 0, mtime: now })
+  }
+  sortNodes(root)
+  return root
+}
+
 /** 在树里按路径找节点，用于判断当前点开的是不是「仅云端」条目 */
 export function findTreeNode(nodes: TreeNode[], path: string): TreeNode | null {
   for (const node of nodes) {

@@ -328,7 +328,7 @@ SQLite 表：`settings`、`records`、`tags`、`record_tags`、`chats`、`messag
 ### 6.3 产品范围
 
 - 支持左右分屏对照，但不支持上下分屏；
-- 知识库是全文检索 + 截断注入，没有向量检索；
+- 知识库支持向量化 / 混合检索，并提供基于向量库的图谱派生视图；
 - 备份为全量 zip，没有增量与定时任务；恢复不做三方合并；
 - MCP 只做 stdio 传输，工具调用依赖模型按约定输出 ```` ```tool ```` 代码块（不走 function calling）。
 
@@ -337,14 +337,16 @@ SQLite 表：`settings`、`records`、`tags`、`record_tags`、`chats`、`messag
 | 项目 | 结果 |
 | --- | --- |
 | `npm run typecheck` | 0 错误 |
-| `npm run sidecar-check` | **214 / 0**；v0.5.9 新增 9 条知识图谱协议断言（结构 / 水印 / 缓存 / 块粒度 / 发现 / 阈值）全通过 |
-| `npm run smoke` | **34 / 0**，截图 5 张；其中 13 条为大纲回归、9 条为 v0.5.9 知识图谱界面断言（含编辑器 hidden 保活与切回后正文仍在） |
-| `npm run e2e` | **351 通过 / 1 失败**；唯一失败为「全局热键当场弹出标注工具栏」，属本机锁屏 / 远程会话无法注入全局热键的既有环境项。v0.5.9 新增 11 条图谱断言（工作区 / 控制器 / 详情区 / hidden 保活 / 参数控件 / 选中联动 / 发现关联 / 打开原笔记回到编辑器）全通过 |
+| `npm run sidecar-check` | **216 / 0**（v0.5.11 复跑，含 `dialog/openFiles` 自动化降级契约）；v0.5.10 曾 212 / 0，v0.5.9 曾 214 / 0，9 条知识图谱协议断言全通过 |
+| `npm run smoke` | **38 / 0**，截图 5 张；v0.5.11 新增 2 条刷新反馈回归，v0.5.10 新增 2 条性能回归（同步 RPC 挂起时仍能打开正文、上传后文件树增量出现新节点） |
+| `npm run e2e` | **351 / 0**（v0.5.11 全绿，含之前锁屏 / 远程会话环境项的全局热键链路）；v0.5.9 新增 11 条图谱断言（工作区 / 控制器 / 详情区 / hidden 保活 / 参数控件 / 选中联动 / 发现关联 / 打开原笔记回到编辑器）全通过 |
 | `node scripts/ui-probe-840.mjs` | 31 通过 / 0 失败（本版未重跑，历史结果） |
-| 后端单元测试 | `cargo test --bin backend` **27 / 0**（v0.5.9 新增 3 条图谱单测，另含 1 条真实 Git 仓库集成用例）；`cargo check` 通过（1 条既存 `dead_code` 警告） |
-| 本地产物说明 | v0.5.9 已在 `backend/` 目录内 `cargo build --release` 重建 release Sidecar（4m44s，4,471,296 B）并重新构建前端，生成可安装的 `.dbxp`；从**包内解出的** Sidecar 用 `DBX_NOTE_BACKEND` 跑 `sidecar-check` 得 **214 / 0**、握手版本 `0.5.9`；CI 的 5 平台矩阵仍只负责正式发布产物 |
+| 后端单元测试 | `cargo test --bin backend` **28 / 0**（v0.5.11 新增 `native_open_filter` 单测；v0.5.9 新增 3 条图谱单测，另含 1 条真实 Git 仓库集成用例）；release 构建只剩 1 条既存 `dead_code` 警告 |
+| 本地产物说明 | v0.5.11 已在 `backend/` 目录内 `cargo build --release` 重建 release Sidecar，配合已构建的 `ui/`（`index-BYTYJZcp.js`）生成可安装 `.dbxp`；从**包内解出的** Sidecar 跑 `sidecar-check` 得 **216 / 0**、握手版本 `0.5.11`；CI 的 5 平台矩阵仍只负责正式发布产物 |
 | 产物 | 本地安装包 `release/com.mjj3610.note-0.5.8-windows-x64.dbxp`（3,911,385 B，sha256 `7f2fe5922127d93162a1291d2063e9e167c438e0154c68fbb2e91994f124f716`）已包含大纲修复并重新校验（12/12 checksums、Sidecar 字节一致）。**v0.5.8 已发布**：Release https://github.com/mjj3610/dbx-note/releases/tag/v0.5.8 ，5 平台 CI run `42956095802` **attempt 1 全绿**，商店候选 https://github.com/t8y2/dbx-store/pull/501 等待维护者 `/sign`；上游已上架 v0.5.7（PR #498 已签名合并） |
 | v0.5.9 | 知识图谱 1~4 阶段完成，版本号统一 `0.5.9`；`dev` 已合并 `main`。**已发布** https://github.com/mjj3610/dbx-note/releases/tag/v0.5.9 ，CI run `43040620365` **attempt 1 全绿**（5 平台 + publish 共 6 job）；商店候选 https://github.com/t8y2/dbx-store/pull/507 （open，等待维护者 `/sign`；上游已上架 0.5.8）。本地安装包 `release/com.mjj3610.note-0.5.9-windows-x64.dbxp`（**3,946,626 B / sha256 `fbd55dffdfcfb84b44fc3c12963278b9b6459c580e4bc71d9bcf98db2bff2998`**），包校验 **14/0**、包内 Sidecar 协议自检 **214/0**。设计与发布记录见 `docs/知识图谱设计-v0.5.9.md` / `docs/release-notes-v0.5.9.md` / `docs/版本部署变更说明-v0.5.9.md` / `store-submission/PUBLISH.md` |
+| v0.5.10 | 打开笔记 / 上传文件性能优化，**仅在 `dev` 分支实现，暂未发布**。打开改为「乐观切换 → 先本地读盘渲染 → 后台远端比对」，消除每次开笔记等待 git fetch 的问题；上传补即时进度、取消兜底、6 路并发读取与增量插树，不再全量重扫 + 触发远端清单。版本号统一 `0.5.10`。本地安装包 `release/com.mjj3610.note-0.5.10-windows-x64.dbxp`（**3,947,816 B / sha256 `dbd0071644fde9e634f211c5714fd893f85fb2a5a4ae68b8aaa212565572596c`**），包校验 **16/0**、包内 Sidecar 协议自检 **214/0**、握手 `0.5.10`，已按纯增量落盘到宿主目录供验证。详见 `docs/release-notes-v0.5.10.md` / `docs/版本部署变更说明-v0.5.10.md` |
+| v0.5.11 | 修复 0.5.10 安装后「上传 / 导入无响应、刷新无反馈」。新增 Sidecar RPC `dialog/openFiles`：Windows 走 `GetOpenFileNameW` 原生多选对话框并置顶，前端原生优先、DOM input 仅降级，删除 focus 误判；刷新按钮加忙碌态与完成 / 失败 toast。版本号统一 `0.5.11`，**仅在 `dev` 分支实现，暂未发布**。本地安装包 `release/com.mjj3610.note-0.5.11-windows-x64.dbxp`（**3,952,345 B / sha256 `70d3b4c7b39dad75ff9b18ba06c72eea881e952f88e45767c34e80ed48056322`**），包校验 **19/0**、包内 Sidecar 协议自检 **216/0**、握手 `0.5.11`，已按纯增量落盘到宿主目录供验证。详见 `docs/release-notes-v0.5.11.md` / `docs/版本部署变更说明-v0.5.11.md` |
 
 截图链路除了功能断言，还有一条**像素级自检**：`screenshot/window` 返回的
 `pixels.inside` / `pixels.outside` 分别核对「选区内是否 1:1 原像素」「选区外是否压暗」，

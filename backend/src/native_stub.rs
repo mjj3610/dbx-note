@@ -83,6 +83,15 @@ pub fn save_text_file(_params: &Value) -> RpcResult {
     }))
 }
 
+/// 非 Windows 没有系统文件选择对话框：返回 unsupported，前端回退到 input[type=file]
+pub fn open_files(_params: &Value) -> RpcResult {
+    Ok(serde_json::json!({
+        "cancelled": false,
+        "unsupported": true,
+        "message": "当前平台暂不支持系统文件选择对话框，前端回退到文件输入框"
+    }))
+}
+
 /// 非 Windows 没有系统打印通道：返回 unsupported，前端回退到浏览器打印
 pub fn print_html(_params: &Value) -> RpcResult {
     Ok(serde_json::json!({

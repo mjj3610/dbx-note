@@ -4,7 +4,9 @@
  * - 文件树来自 Sidecar，不在前端缓存内容；
  * - 支持多标签：每个标签只记路径与脏标记，正文仅保留「当前标签」一份，
  *   切标签时先 flush 再读盘，避免多份副本互相覆盖；
- * - 打开文件时读取正文，编辑后 800ms 防抖自动保存；
+ * - 打开文件时「乐观切换 → 先读本地盘渲染 → 后台再比对远端」，
+ *   不让 git fetch / 对象存储清单阻塞正文（对齐参考项目 readArticle）；
+ * - 编辑后 800ms 防抖自动保存；
  * - 切换文件或关闭前强制 flush，避免丢字。
  */
 import { create } from 'zustand'
@@ -12,10 +14,15 @@ import { create } from 'zustand'
 import * as rpc from '@/lib/rpc'
 import type { TreeNode } from '@/lib/rpc'
 import { baseName, dirName } from '@/lib/utils'
-import { findTreeNode, mergeRemoteTree } from '@/lib/tree'
+import { findTreeNode, insertLocalPaths, mergeRemoteTree } from '@/lib/tree'
 import { useSettingsStore } from '@/stores/settings'
 import { useUiStore } from '@/stores/ui'
-import { pullOnOpen, pullRemoteFileOnDemand, scheduleAutoSync } from '@/lib/autoSync'
+import {
+  pullOnOpen,
+  pullRemoteFileOnDemand,
+  scheduleAutoSync,
+  type PullOnOpenResult,
+} from '@/lib/autoSync'
 
 export type SaveState = 'idle' | 'saving' | 'saved' | 'error'
 
@@ -104,6 +111,13 @@ interface NotesState {
   refreshRemoteTree: (options?: { force?: boolean }) => Promise<void>
   /** 用户点「重试」：强制重拉一次，返回是否恢复 */
   retryRemoteTree: () => Promise<boolean>
+  /**
+   * 导入 / 云端下载完成后，把新落盘路径增量插进文件树。
+   *
+   * 不重扫磁盘、不触发 `sync/remoteTree`，避免一次导入带出全量 `fs/tree`
+   * 与一轮 git fetch（旧版上传完卡顿的主因）。
+   */
+  applyLocalPaths: (paths: string[]) => void
   /** `force` 用于「乐观接管」：activePath 已先切过去，仍要真正读一次盘 */
   open: (path: string, options?: { force?: boolean }) => Promise<void>
   /**
@@ -232,6 +246,203 @@ function updateTab(tabs: EditorTab[], path: string, patch: Partial<EditorTab>): 
   return tabs.map((tab) => (tab.path === path ? { ...tab, ...patch } : tab))
 }
 
+/* ---------------- 打开笔记：乐观渲染 + 后台远端比对 ----------------
+ *
+ * 旧版 open() 是 `pullOnOpen(path)` → `readFile(path)` → 渲染：
+ * Git 通道的 pullOnOpen 会走 `sync/compare`，后端 `gitsync::compare()`
+ * 里再 `fetch_snapshot()`（一次 git fetch / 网络往返）。也就是说每点一篇
+ * 本地笔记都要先等网络，这正是「打开笔记文件很慢」的根因。
+ *
+ * 参考项目是三段式：
+ *   setActiveFilePath() 先切 activeFilePath / loading
+ *   → readArticle() 本地 readTextFile() 后立刻 set({ currentArticle, loading:false })
+ *   → await syncOnOpen() 在后台比对，结果用 emitter 覆盖编辑器，失败静默。
+ *
+ * 这里按同样语义落地，并补上参考项目的 articleReadGeneration / 
+ * pendingArticleReads 对应的竞态防护（openGeneration / pendingOpens），
+ * 外加「后台比对同一时刻只跑一个、只保留最后一次」避免快速连点堆 git 进程。
+ */
+
+/** 打开代号：用户快速连点时，慢请求回来不能覆盖后来点开的文件 */
+let openGeneration = 0
+/** 同路径并发打开去重：连点同一个文件只发一次读盘 */
+const pendingOpens = new Map<string, Promise<void>>()
+/** 后台远端比对单飞；排队时只保留最后一次打开 */
+let pullInFlight = false
+let pullQueued: { path: string; generation: number } | null = null
+
+/**
+ * 后台把远端新版本应用到编辑器
+ *
+ * 只在「没有本地未保存改动」时直接替换；如果网络比对期间用户已经开始输入，
+ * 交给冲突弹窗决定保留哪边，否则下一次自动保存会把刚拉下来的远端版本覆盖掉
+ * （旧版注释里担心的「等于回滚远端更新」正是这个场景）。
+ */
+async function applyRemoteOnOpen(
+  set: NotesSetter,
+  get: NotesGetter,
+  path: string,
+  generation: number,
+): Promise<void> {
+  // 排队期间用户又点了别的文件：这次比对直接作废，省掉一轮 git fetch
+  if (generation !== openGeneration) return
+  let pulled: PullOnOpenResult | null = null
+  try {
+    pulled = await pullOnOpen(path)
+  } catch {
+    return // 网络失败静默，与参考项目一致
+  }
+  if (generation !== openGeneration || !pulled) return
+  if (pulled.conflict) {
+    useUiStore.getState().showSyncConflict(pulled.conflict)
+    return
+  }
+  if (!pulled.updated) return
+
+  // Git 通道直接回传正文；对象存储整批拉取后重读一次磁盘
+  let remoteText = pulled.content
+  if (typeof remoteText !== 'string') {
+    try {
+      remoteText = (await rpc.readFile(path)).content
+    } catch {
+      return
+    }
+  }
+  if (generation !== openGeneration) return
+  const current = get()
+  if (current.activePath !== path) return
+  if (current.content !== current.savedContent) {
+    useUiStore.getState().showSyncConflict({ path, local: current.content, remote: remoteText })
+    return
+  }
+  set({
+    content: remoteText,
+    savedContent: remoteText,
+    saveState: 'idle',
+    tabs: updateTab(get().tabs, path, { dirty: false }),
+  })
+}
+
+function scheduleBackgroundPull(
+  set: NotesSetter,
+  get: NotesGetter,
+  path: string,
+  generation: number,
+): void {
+  if (pullInFlight) {
+    pullQueued = { path, generation }
+    return
+  }
+  pullInFlight = true
+  void (async () => {
+    try {
+      await applyRemoteOnOpen(set, get, path, generation)
+    } finally {
+      pullInFlight = false
+      const next = pullQueued
+      pullQueued = null
+      if (next && next.generation === openGeneration) {
+        scheduleBackgroundPull(set, get, next.path, next.generation)
+      }
+    }
+  })()
+}
+
+/** 真正执行一次打开；由 `open()` 包一层同路径去重 */
+async function performOpen(
+  set: NotesSetter,
+  get: NotesGetter,
+  path: string,
+  options?: { force?: boolean },
+): Promise<void> {
+  if (!path) return
+  const state = get()
+  const hasTab = state.tabs.some((tab) => tab.path === path)
+  // 只看 activePath 会在「关闭全部标签 / 恢复标签」的竞态里留下不一致状态：
+  // 编辑器已经加载了这篇笔记，tabs 却是空的，再点同一文件会被短路、标签永远补不回来。
+  if (state.activePath === path && hasTab && !options?.force) return
+  // 先落盘上一篇（纯本地磁盘写，不牵涉网络），再切换
+  await flushPendingSave()
+
+  const generation = ++openGeneration
+  const node = findTreeNode(get().tree, path)
+  // 「仅云端」节点本地磁盘没有文件，必须等下载完才能渲染，因此不提前切 tab
+  const remoteOnly = Boolean(node?.remoteOnly)
+  const withTab = (): EditorTab[] => {
+    const current = get().tabs
+    return current.some((tab) => tab.path === path)
+      ? current
+      : [...current, { path, name: baseName(path), dirty: false }]
+  }
+
+  if (remoteOnly) {
+    set({ loadingFile: true, lastError: null })
+  } else {
+    // 乐观接管：标签栏与标题立刻响应，正文区由 loadingFile 占位。
+    // 与参考项目 setActiveFilePath() 的 set({ currentArticle: '', loading }) 同义。
+    const tabs = withTab()
+    set({
+      tabs,
+      activePath: path,
+      title: baseName(path),
+      content: '',
+      savedContent: '',
+      loadingFile: true,
+      saveState: 'idle',
+      lastError: null,
+    })
+    persistTabs(tabs, path)
+    get().expandTo(path)
+  }
+
+  try {
+    if (remoteOnly) {
+      // 参考项目 pullMissingRemoteArticle()：节点只存在于云端，先把这一个文件下下来
+      await pullRemoteFileOnDemand(path)
+      // 刚为这个文件 fetch 过一次，重读本地盘即可；再发一次清单请求纯属浪费
+      void get().loadTree({ skipRemoteSync: true })
+    }
+    // 关键路径只剩「读本地盘」
+    const file = await rpc.readFile(path)
+    if (generation !== openGeneration) return
+    const tabs = withTab()
+    set({
+      tabs,
+      activePath: path,
+      title: baseName(path),
+      content: file.content,
+      savedContent: file.content,
+      loadingFile: false,
+      saveState: 'idle',
+    })
+    persistTabs(tabs, path)
+    get().expandTo(path)
+
+    // 远端比对放后台：不再阻塞正文渲染，失败也不打扰用户
+    if (!remoteOnly) scheduleBackgroundPull(set, get, path, generation)
+  } catch (error) {
+    if (generation !== openGeneration) return
+    const message = error instanceof Error ? error.message : String(error)
+    set({ loadingFile: false, lastError: message })
+    throw error
+  }
+}
+
+/** 同路径并发打开复用同一个 Promise；`force` 用于乐观接管时强制重读 */
+function enqueueOpen(
+  path: string,
+  options: { force?: boolean } | undefined,
+  run: () => Promise<void>,
+): Promise<void> {
+  const existing = pendingOpens.get(path)
+  if (existing && !options?.force) return existing
+  const tracked: Promise<void> = run().finally(() => {
+    if (pendingOpens.get(path) === tracked) pendingOpens.delete(path)
+  })
+  pendingOpens.set(path, tracked)
+  return tracked
+}
+
 export const useNotesStore = create<NotesState>((set, get) => ({
   tree: [],
   loadingTree: false,
@@ -352,59 +563,15 @@ export const useNotesStore = create<NotesState>((set, get) => ({
     return get().remoteTreeFailure === null
   },
 
-  open: async (path, options) => {
-    if (!path) return
-    const state = get()
-    const hasTab = state.tabs.some((tab) => tab.path === path)
-    // 只看 activePath 会在「关闭全部标签 / 恢复标签」的竞态里留下不一致状态：
-    // 编辑器已经加载了这篇笔记，tabs 却是空的，再点同一文件会被短路、标签永远补不回来。
-    // 因此 activePath 命中但标签缺失时，仍要走完整 open() 把标签补上。
-    if (state.activePath === path && hasTab && !options?.force) return
-    // 先落盘上一篇，再切换
-    await flushPendingSave()
-
-    set({ loadingFile: true, lastError: null })
-    try {
-      // 先比对远端、按需拉取，再读盘。
-      // 顺序不能反：以前是「读盘 → 异步 pull」，拉完编辑器仍持有旧内容，
-      // 用户一编辑保存就会把刚拉下来的版本覆盖掉（等于回滚远端更新）。
-      const node = findTreeNode(get().tree, path)
-      if (node?.remoteOnly) {
-        // 参考项目 `pullMissingRemoteArticle()`：节点只存在于云端，本地磁盘没有，
-        // 点开时先把这一个文件下下来。此路径不看 autoPullOnOpen 开关。
-        await pullRemoteFileOnDemand(path)
-        // 刚为这个文件 fetch 过一次，重读本地盘即可；再发一次清单请求纯属浪费。
-        // 对齐参考项目 `loadFileTree({ skipRemoteSync: true })` 的用法。
-        void get().loadTree({ skipRemoteSync: true })
-      } else {
-        const pulled = await pullOnOpen(path).catch(() => null)
-        if (pulled?.conflict) {
-          // 两边都改过：本地内容先照常渲染，同时弹窗让用户选保留哪边
-          useUiStore.getState().showSyncConflict(pulled.conflict)
-        }
-      }
-      const file = await rpc.readFile(path)
-      const opened = get().tabs.some((tab) => tab.path === path)
-      const tabs = opened
-        ? get().tabs
-        : [...get().tabs, { path, name: baseName(path), dirty: false }]
-      set({
-        tabs,
-        activePath: path,
-        title: baseName(path),
-        content: file.content,
-        savedContent: file.content,
-        loadingFile: false,
-        saveState: 'idle',
-      })
-      persistTabs(tabs, path)
-      get().expandTo(path)
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      set({ loadingFile: false, lastError: message })
-      throw error
-    }
+  /** 导入 / 下载完成后增量插树：不重扫磁盘、不触发远端清单 */
+  applyLocalPaths: (paths) => {
+    if (paths.length === 0) return
+    set({ tree: insertLocalPaths(get().tree, paths) })
+    for (const path of paths) get().expandTo(path)
   },
+
+  open: (path, options) =>
+    enqueueOpen(path, options, () => performOpen(set, get, path, options)),
 
   /** 重新读当前文件：手动拉取、解决冲突、拉取全部之后调用 */
   reloadActive: async (options) => {

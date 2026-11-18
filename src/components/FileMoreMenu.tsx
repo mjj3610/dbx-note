@@ -48,9 +48,12 @@ import {
 import {
   downloadRemotePaths,
   downloadKnowledgeBase,
+  endImportFeedback,
   importLocalFiles,
   isStaticAssetPath,
+  makeImportFeedback,
   remoteOnlyPaths,
+  reportImportResult,
   uploadKnowledgeBase,
   type ImportMode,
 } from '@/lib/fileActions'
@@ -74,9 +77,7 @@ export function FileMoreMenu() {
   const patchFileView = useSettingsStore((state) => state.patchFileView)
   const refreshKb = useKbStore((state) => state.refresh)
 
-  const loadTree = () => useNotesStore.getState().loadTree()
-
-  /** 执行一个会改动工作区 / 索引的动作，统一处理 busy、刷新与错误提示 */
+  /** 执行一个会改动工作区 / 索引的动作，统一处理 busy 与错误提示 */
   const run = async (action: () => Promise<void>, successKey?: string, params?: Record<string, string | number>) => {
     if (busy) return
     setBusy(true)
@@ -92,17 +93,17 @@ export function FileMoreMenu() {
 
   const doImport = (mode: ImportMode) =>
     run(async () => {
-      const result = await importLocalFiles('', mode, {}, fileView.syncStaticAssets)
-      if (!result) return
-      if (result.imported === 0) {
-        toast.message(t('files.more.nothingImported'))
-        return
-      }
-      await loadTree()
-      if (result.skipped > 0) {
-        toast.success(t('files.more.importSkipped', { count: result.imported, skipped: result.skipped }))
-      } else {
-        toast.success(t('files.more.imported', { count: result.imported }))
+      try {
+        const result = await importLocalFiles(
+          '',
+          mode,
+          {},
+          fileView.syncStaticAssets,
+          makeImportFeedback(t),
+        )
+        reportImportResult(t, result, useNotesStore.getState().applyLocalPaths)
+      } finally {
+        endImportFeedback()
       }
     })
 
@@ -116,7 +117,7 @@ export function FileMoreMenu() {
         return
       }
       const count = await downloadRemotePaths(paths)
-      await loadTree()
+      useNotesStore.getState().applyLocalPaths(paths)
       toast.success(t('files.more.remoteDone', { count }))
     })
 

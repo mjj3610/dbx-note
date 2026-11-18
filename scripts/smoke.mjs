@@ -168,6 +168,86 @@ check('切回文件页签后编辑器内容仍在',
   await page.locator('.ProseMirror').isVisible()
     && (await page.locator('.ProseMirror').innerText()).includes('冒烟测试内容'))
 
+// 0.5.10 打开笔记性能回归：
+// 把网络 / 同步类 RPC 全部挂起（永不结算），验证本地读盘仍能立刻渲染正文。
+// 旧版 open() 先 `await pullOnOpen(path)` → syncPrefs + syncStoreOptions (+ git fetch)，
+// 这些调用一慢正文就出不来；新版先读盘渲染，远端比对放后台。
+await page.evaluate(() => {
+  const host = window.dbxPlugin
+  const original = host.invoke.bind(host)
+  host.__originalInvoke = original
+  const probe = { hung: 0, read: 0 }
+  window.__dbxOpenProbe = probe
+  host.invoke = (method, params, options) => {
+    if (/^(sync|store|s3)\//.test(method)) {
+      probe.hung += 1
+      return new Promise(() => {}) // 故意永不结算
+    }
+    if (method === 'fs/read') probe.read += 1
+    return original(method, params, options)
+  }
+})
+
+// 新建第二篇，使第一篇不再是当前标签；再点回第一篇触发真正的 open()
+await page.getByRole('button', { name: '新建笔记' }).first().click()
+await nameInput.waitFor({ state: 'visible', timeout: 4000 })
+const secondName = `打开验证-${Date.now().toString().slice(-6)}`
+await nameInput.fill(secondName)
+await nameInput.press('Enter')
+await page.waitForTimeout(900)
+const firstTabPath = await page.locator('[data-tab-path]').evaluateAll((elements, name) =>
+  elements.map((element) => element.getAttribute('data-tab-path')).find((value) => value?.includes(name)),
+  noteName,
+)
+const openStartedAt = Date.now()
+await page.locator(`[data-tab-path="${firstTabPath}"]`).click()
+let renderedWhileHanging = false
+try {
+  await page.waitForFunction(
+    () => (document.querySelector('.ProseMirror')?.textContent ?? '').includes('冒烟测试内容'),
+    null,
+    { timeout: 2500 },
+  )
+  renderedWhileHanging = true
+} catch {
+  /* 由下面的 check 报告 */
+}
+check('同步 RPC 挂起时打开笔记仍能渲染正文', renderedWhileHanging,
+  `耗时 ${Date.now() - openStartedAt}ms`)
+
+// 恢复桥接，避免后续设置 / 主题断言被挂起的 Promise 干扰
+await page.evaluate(() => {
+  const host = window.dbxPlugin
+  if (host.__originalInvoke) host.invoke = host.__originalInvoke
+})
+
+// 0.5.10 上传文件回归：点菜单立刻给反馈；选完文件后增量插树，
+// 不再 `await loadTree()` 全量重扫 + 顺带触发一轮 git fetch。
+await page.locator(`[data-tree-node="${noteName}.md"]`).click({ button: 'right' })
+await page.waitForTimeout(350)
+const chooserPromise = page.waitForEvent('filechooser')
+await page.locator('[data-tree-action="upload-file"]').click()
+const chooser = await chooserPromise
+const uploadName = `上传验证-${Date.now().toString().slice(-6)}.md`
+await chooser.setFiles({
+  name: uploadName,
+  mimeType: 'text/markdown',
+  buffer: Buffer.from('# 上传验证\n\n来自冒烟测试。'),
+})
+await page.waitForTimeout(1000)
+check('上传后文件树增量出现新节点',
+  (await page.locator(`[data-tree-node="${uploadName}"]`).count()) >= 1)
+
+// 0.5.11 刷新按钮反馈：旧版只调 loadTree()，界面无 loading 也无结果提示，
+// 用户点了看不到任何变化就以为「没响应」。现在要求有 aria-busy 与完成 toast。
+await page.locator('[data-files-refresh]').click()
+await page.waitForTimeout(150)
+const refreshToasts = await page.locator('[data-sonner-toast]').allInnerTexts()
+check('刷新给出完成反馈', refreshToasts.some((text) => text.includes('文件列表已刷新')),
+  refreshToasts.join(' | '))
+check('刷新按钮结束忙碌态',
+  (await page.locator('[data-files-refresh]').getAttribute('aria-busy')) === 'false')
+
 // 设置
 await page.getByRole('button', { name: '设置' }).click()
 await page.waitForTimeout(600)

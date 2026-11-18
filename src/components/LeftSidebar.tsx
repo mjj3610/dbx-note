@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { toast } from 'sonner'
 import { FileText, FolderPlus, Highlighter, ListTree, Network, Palette, Plus, RefreshCw, Search, X } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
@@ -37,12 +38,36 @@ export function LeftSidebar() {
   const startNewItem = useUiStore((state) => state.startNewItem)
 
   const [keyword, setKeyword] = useState('')
+  const [refreshing, setRefreshing] = useState(false)
   const tree = useNotesStore((state) => state.tree)
   const loadTree = useNotesStore((state) => state.loadTree)
   const refreshRemoteTree = useNotesStore((state) => state.refreshRemoteTree)
   const setRecordFilter = useRecordsStore((state) => state.setFilter)
   const loadRecords = useRecordsStore((state) => state.load)
   const fileView = useSettingsStore((state) => state.fileView)
+
+  /**
+   * 手动刷新文件树：加旋转态与结果提示。
+   *
+   * 旧版只调 loadTree()，界面上既没有 loading 也没有完成反馈，
+   * 用户点了之后树没变化就以为「按钮没响应」。这里把过程与结果都显性化。
+   */
+  const handleRefreshTree = async () => {
+    if (refreshing) return
+    setRefreshing(true)
+    try {
+      await loadTree()
+      const error = useNotesStore.getState().error
+      if (error) toast.error(t('files.refreshFailed', { message: error }))
+      else toast.success(t('files.refreshDone'))
+    } catch (error) {
+      toast.error(t('files.refreshFailed', {
+        message: error instanceof Error ? error.message : String(error),
+      }))
+    } finally {
+      setRefreshing(false)
+    }
+  }
 
   // 记录搜索走后端，输入防抖 260ms
   const pushRecordQuery = useMemo(
@@ -131,8 +156,16 @@ export function LeftSidebar() {
           {tab === 'files' ? (
             <>
               <Hint label={t('common.refresh')}>
-                <Button variant="ghost" size="icon-sm" aria-label={t('common.refresh')} onClick={() => void loadTree()}>
-                  <RefreshCw className="size-4" />
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label={t('common.refresh')}
+                  data-files-refresh
+                  aria-busy={refreshing}
+                  disabled={refreshing}
+                  onClick={() => void handleRefreshTree()}
+                >
+                  <RefreshCw className={cn('size-4', refreshing && 'animate-spin')} />
                 </Button>
               </Hint>
               <FileMoreMenu />

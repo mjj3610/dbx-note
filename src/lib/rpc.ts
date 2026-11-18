@@ -297,6 +297,37 @@ export function saveTextFile(params: {
   return call('dialog/saveFile', params, 120_000)
 }
 
+/** 原生文件选择对话框返回的一条：内容以不带 data: 前缀的 base64 回传 */
+export interface NativePickedFile {
+  name: string
+  contentBase64: string
+  size: number
+}
+
+export interface OpenFilesResult {
+  /** 用户点了取消 */
+  cancelled: boolean
+  /** 平台不支持 / 自动化环境：前端需回退到 input[type=file] */
+  unsupported?: boolean
+  message?: string
+  files: NativePickedFile[]
+}
+
+/**
+ * 弹系统「打开文件」对话框并读回内容（Sidecar 侧执行）。
+ *
+ * 宿主插件跑在 sandbox iframe 里，`<input type=file>` 的对话框不可靠，
+ * 因此上传 / 导入统一先走这里；拿到的字节在前端包成 File，后续链路不变。
+ * 原生对话框可能停留较久，超时给 5 分钟。
+ */
+export function dialogOpenFiles(params: {
+  multiple?: boolean
+  directory?: boolean
+  accept?: string
+}): Promise<OpenFilesResult> {
+  return call('dialog/openFiles', params, 300_000)
+}
+
 export function createEntry(params: {
   kind: 'file' | 'folder'
   parent: string

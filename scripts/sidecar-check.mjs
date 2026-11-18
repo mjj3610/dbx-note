@@ -176,6 +176,8 @@ const child = spawn(BIN, [], {
     DBX_NOTE_SCREENSHOT_AUTO_EXIT: '',
     // 导出「另存为」：自检不弹系统模态框，写到固定目录后校验文件真的落盘
     DBX_NOTE_EXPORT_AUTO_DIR: join(ROOT, '.tmp', 'sidecar-exports'),
+    // 上传 / 导入：原生文件对话框是模态框，自检里改为返回 unsupported 让前端回退
+    DBX_NOTE_PICKER_AUTO: '1',
     // 历史版本：origin 是本地裸仓库 / 示例地址，跳过联网 fetch
     DBX_NOTE_HISTORY_OFFLINE: '1',
   },
@@ -308,6 +310,21 @@ async function main() {
     badExtensionBlocked = true
   }
   check('另存为拒绝白名单外的扩展名', badExtensionBlocked)
+
+  /* ---------- 上传 / 导入：原生文件对话框的降级契约 ---------- */
+  // 自检环境设了 DBX_NOTE_PICKER_AUTO：必须返回 unsupported 且带可读 message，
+  // 前端据此回退到 input[type=file]，绝不能弹模态框卡住 Sidecar。
+  const openFilesDecision = await call('dialog/openFiles', {
+    multiple: true,
+    accept: '.md,.markdown,.txt',
+  })
+  check(
+    '文件选择在自动化环境返回 unsupported 而非弹框',
+    openFilesDecision.unsupported === true && Boolean(openFilesDecision.message),
+    JSON.stringify(openFilesDecision),
+  )
+  check('文件选择降级结果不谎报已选中文件',
+    Array.isArray(openFilesDecision.files) === false || openFilesDecision.files.length === 0)
 
   // 回归：四种导出格式各自产出对应后缀与正文，且默认名残留旧后缀时会被规范掉，
   // 不能出现「点 Markdown 却写出 .html」或「笔记.html.md」这种双后缀。

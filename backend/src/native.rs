@@ -661,6 +661,115 @@ mod win {
         std::fs::write(&path, content).map_err(|error| format!("写入失败：{error}"))?;
         Ok(Some(path))
     }
+
+    /// 弹系统「打开文件」对话框（支持多选），返回 { name, bytes } 列表。
+    ///
+    /// DBX 宿主把插件放在 `sandbox="allow-scripts"` 的 iframe 里，隐藏
+    /// `<input type=file>` 的对话框在沙箱里不稳定（可能不弹或落在主窗口下面），
+    /// 因此和「另存为」一样交给 Sidecar 用 Win32 原生对话框处理。
+    ///
+    /// @param multiple 是否允许多选
+    /// @param filter   过滤器，形如 `Markdown\0*.md;*.markdown\0所有文件\0*.*\0`
+    /// @param title    对话框标题
+    /// @return 取消返回 `None`；确认返回文件列表（含绝对路径与字节内容）
+    pub fn open_files_dialog(
+        multiple: bool,
+        filter: &str,
+        title: &str,
+    ) -> Result<Option<Vec<(String, Vec<u8>)>>, String> {
+        use windows_sys::Win32::Foundation::HWND;
+        use windows_sys::Win32::System::Com::{
+            CoInitializeEx, CoUninitialize, COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE,
+        };
+        use windows_sys::Win32::UI::Controls::Dialogs::{
+            GetOpenFileNameW, OFN_ALLOWMULTISELECT, OFN_ENABLEHOOK, OFN_EXPLORER, OFN_FILEMUSTEXIST,
+            OFN_NOCHANGEDIR, OFN_PATHMUSTEXIST, OPENFILENAMEW,
+        };
+        use windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
+
+        // 多选时缓冲区要能装下所有路径（UTF-16），固定 64K 足够一次 normality 导入
+        const FILE_BUFFER_UNITS: usize = 64 * 1024;
+        let mut file = vec![0u16; FILE_BUFFER_UNITS];
+        let filter_wide: Vec<u16> = filter.encode_utf16().chain(std::iter::once(0)).collect();
+        let title_wide: Vec<u16> = format!("{title}\0").encode_utf16().collect();
+
+        focus_host();
+        let owner: HWND = unsafe { GetForegroundWindow() };
+
+        let mut ofn: OPENFILENAMEW = unsafe { std::mem::zeroed() };
+        ofn.lStructSize = std::mem::size_of::<OPENFILENAMEW>() as u32;
+        ofn.hwndOwner = owner;
+        ofn.lpstrFilter = filter_wide.as_ptr();
+        ofn.lpstrFile = file.as_mut_ptr();
+        ofn.nMaxFile = file.len() as u32;
+        ofn.lpstrTitle = title_wide.as_ptr();
+        ofn.nFilterIndex = 1;
+        // 置顶 hook 与「另存为」共用，避免对话框落在 DBX 主窗口下面
+        ofn.lpfnHook = Some(save_dialog_hook);
+        let mut flags = OFN_EXPLORER
+            | OFN_ENABLEHOOK
+            | OFN_FILEMUSTEXIST
+            | OFN_PATHMUSTEXIST
+            | OFN_NOCHANGEDIR;
+        if multiple {
+            flags |= OFN_ALLOWMULTISELECT;
+        }
+        ofn.Flags = flags;
+
+        let hr = unsafe {
+            CoInitializeEx(
+                std::ptr::null(),
+                (COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE) as u32,
+            )
+        };
+        let com_ready = hr >= 0;
+        let ok = unsafe { GetOpenFileNameW(&mut ofn) };
+        if com_ready {
+            unsafe { CoUninitialize() };
+        }
+        if ok == 0 {
+            return Ok(None);
+        }
+
+        // 解析 double-NUL 结尾的路径列表：
+        // - 单选：整段是一个完整路径
+        // - 多选：第一段是目录，其后是文件名，直到空串
+        let mut parts: Vec<String> = Vec::new();
+        let mut cursor = 0usize;
+        while cursor < file.len() {
+            let start = cursor;
+            while cursor < file.len() && file[cursor] != 0 {
+                cursor += 1;
+            }
+            if cursor == start {
+                break;
+            }
+            parts.push(String::from_utf16_lossy(&file[start..cursor]));
+            cursor += 1;
+        }
+        if parts.is_empty() {
+            return Ok(None);
+        }
+
+        let paths: Vec<std::path::PathBuf> = if parts.len() == 1 {
+            vec![std::path::PathBuf::from(&parts[0])]
+        } else {
+            let dir = std::path::PathBuf::from(&parts[0]);
+            parts[1..].iter().map(|name| dir.join(name)).collect()
+        };
+
+        let mut result = Vec::with_capacity(paths.len());
+        for path in paths {
+            let bytes = std::fs::read(&path)
+                .map_err(|error| format!("读取文件失败：{} · {error}", path.to_string_lossy()))?;
+            let name = path
+                .file_name()
+                .map(|value| value.to_string_lossy().to_string())
+                .unwrap_or_else(|| "file".to_string());
+            result.push((name, bytes));
+        }
+        Ok(Some(result))
+    }
 }
 
     #[cfg(all(test, windows))]
@@ -689,6 +798,21 @@ mod win {
             assert_eq!(sanitize_export_name("笔记.md", "md"), "笔记.md");
             assert_eq!(sanitize_export_name("", "html"), "document.html");
             assert_eq!(sanitize_export_name("  a/b:c\\d.json  ", "json"), "abcd.json");
+        }
+
+        #[test]
+        fn open_filter_turns_accept_into_win32_pattern() {
+            use super::native_open_filter;
+            assert_eq!(
+                native_open_filter(".md,.markdown,.txt"),
+                "可选文件\0*.md;*.markdown;*.txt\0所有文件\0*.*\0\0"
+            );
+            // MIME 类型（image/png）没有文件扩展名，必须过滤掉避免生成非法 pattern
+            assert_eq!(
+                native_open_filter("image/png, .png"),
+                "可选文件\0*.png\0所有文件\0*.*\0\0"
+            );
+            assert_eq!(native_open_filter(""), "所有文件\0*.*\0\0");
         }
     }
 
@@ -1055,6 +1179,105 @@ pub fn save_text_file(params: &serde_json::Value) -> RpcResult {
             "message": "当前平台暂不支持系统另存为对话框"
         }))
     }
+}
+
+/// 单次「打开文件」允许的最大字节数（32 MiB），防止 RPC payload 把进程内存撑爆
+const IMPORT_MAX_FILE_BYTES: usize = 32 * 1024 * 1024;
+/// 单次导入的文件内容总和上限（64 MiB）
+const IMPORT_MAX_TOTAL_BYTES: usize = 64 * 1024 * 1024;
+/// 自动化回归开关：设置后不弹模态框，返回 unsupported 让前端回退到 input[type=file]
+/// （Playwright 的 filechooser 只能捕获 DOM input，捕获不到 Win32 原生对话框）
+const IMPORT_AUTO_ENV: &str = "DBX_NOTE_PICKER_AUTO";
+
+/**
+ * 「上传 / 导入」文件选择：由 Sidecar 弹 Win32 原生对话框，读回内容与文件名。
+ *
+ * 宿主插件跑在 `sandbox="allow-scripts"` 的 iframe 里，隐藏的 `<input type=file>`
+ * 对话框在沙箱里不稳定（可能不弹、或被焦点事件误判为取消），因此和「另存为」
+ * 一样走 Sidecar。前端拿到 `{ name, contentBase64 }` 后包成 File 对象，
+ * 后续转码 / 写盘链路完全不变。
+ *
+ * @param params { multiple?: boolean, directory?: boolean, accept?: string }
+ * @return `{ cancelled:boolean, files:[{ name, contentBase64, size }] }`；
+ *         非 Windows / 自动化环境返回 `{ unsupported:true, message }` 由前端降级
+ */
+pub fn open_files(params: &serde_json::Value) -> RpcResult {
+    // 自动化回归：不弹模态框，前端自动回退到 DOM input（e2e 用 filechooser 注入文件）
+    if std::env::var_os(IMPORT_AUTO_ENV).is_some() {
+        return Ok(json!({
+            "cancelled": false,
+            "unsupported": true,
+            "message": "自动化环境不弹原生对话框，前端回退到文件输入框"
+        }));
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = params;
+        return Ok(json!({
+            "cancelled": false,
+            "unsupported": true,
+            "message": "当前平台暂不支持系统文件选择对话框，前端回退到文件输入框"
+        }));
+    }
+    #[cfg(windows)]
+    {
+        let multiple = params.get("multiple").and_then(|v| v.as_bool()).unwrap_or(true);
+        let directory = params.get("directory").and_then(|v| v.as_bool()).unwrap_or(false);
+        if directory {
+            // 文件夹选择用 <input webkitdirectory> 在宿主里同样不可靠，明确报错好过静默无响应
+            return Ok(json!({
+                "cancelled": false,
+                "unsupported": true,
+                "message": "原生对话框暂不支持选择文件夹，请改用拖拽导入"
+            }));
+        }
+        // accept 形如 ".md,.markdown,image/png" → Win32 过滤器
+        let accept = params.get("accept").and_then(|v| v.as_str()).unwrap_or("");
+        let filter = native_open_filter(accept);
+        let picked = win::open_files_dialog(multiple, &filter, "选择文件")
+            .map_err(RpcError::internal)?;
+        let Some(files) = picked else {
+            return Ok(json!({ "cancelled": true, "files": [] }));
+        };
+        let mut total = 0usize;
+        let mut out = Vec::with_capacity(files.len());
+        for (name, bytes) in files {
+            if bytes.len() > IMPORT_MAX_FILE_BYTES {
+                return Err(RpcError::invalid(format!(
+                    "文件「{name}」超过 {} MiB 上限",
+                    IMPORT_MAX_FILE_BYTES / 1024 / 1024
+                )));
+            }
+            total += bytes.len();
+            if total > IMPORT_MAX_TOTAL_BYTES {
+                return Err(RpcError::invalid(format!(
+                    "本次导入总大小超过 {} MiB 上限",
+                    IMPORT_MAX_TOTAL_BYTES / 1024 / 1024
+                )));
+            }
+            out.push(json!({
+                "name": name,
+                "contentBase64": base64::engine::general_purpose::STANDARD.encode(&bytes),
+                "size": bytes.len(),
+            }));
+        }
+        Ok(json!({ "cancelled": false, "files": out }))
+    }
+}
+
+/// 把前端 accept 串转成 Win32 过滤器（双 NUL 结尾）
+#[cfg(windows)]
+fn native_open_filter(accept: &str) -> String {
+    let extensions: Vec<String> = accept
+        .split(',')
+        .map(|part| part.trim().trim_start_matches('.'))
+        .filter(|part| !part.is_empty() && !part.contains('/'))
+        .map(|part| format!("*.{part}"))
+        .collect();
+    if extensions.is_empty() {
+        return "所有文件\0*.*\0\0".to_string();
+    }
+    format!("可选文件\0{}\0所有文件\0*.*\0\0", extensions.join(";"))
 }
 
 /// 对话框默认文件名：去掉目录分隔符与控制字符，并保证扩展名一致

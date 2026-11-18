@@ -50,10 +50,13 @@ import {
   createFromTemplate,
   downloadRemotePaths,
   duplicateEntry,
+  endImportFeedback,
   importLocalFiles,
   isStaticAssetPath,
+  makeImportFeedback,
   pasteClipboard,
   remoteOnlyPaths,
+  reportImportResult,
   revealEntry,
   targetDirOf,
 } from '@/lib/fileActions'
@@ -300,6 +303,8 @@ function TreeRow({
   const fileClipboard = useUiStore((state) => state.fileClipboard)
   const setFileClipboard = useUiStore((state) => state.setFileClipboard)
   const selectedTreePath = useUiStore((state) => state.selectedTreePath)
+  /** 上传 / 下载进行中：禁止重复点击，避免叠出一排文件对话框 */
+  const [importBusy, setImportBusy] = useState(false)
 
   const showKbStatus = useSettingsStore((state) => state.fileView.showKnowledgeBaseStatus)
   const syncStaticAssets = useSettingsStore((state) => state.fileView.syncStaticAssets)
@@ -314,13 +319,13 @@ function TreeRow({
   const isActive = activePath === node.path
   const kbIndexed = showKbStatus && kbPaths.includes(node.path)
 
-  /** 把仅云端条目下载到本地并刷新文件树 */
+  /** 把仅云端条目下载到本地：用结果路径增量插树，不再全量重扫磁盘 */
   const downloadRemote = async () => {
     const targets = isFolder ? remoteFilesIn(node) : [node.path]
     for (const target of targets) {
       await pullRemoteFileOnDemand(target)
     }
-    await useNotesStore.getState().loadTree()
+    useNotesStore.getState().applyLocalPaths(targets)
   }
 
   const downloadWithToast = () => {
@@ -363,22 +368,22 @@ function TreeRow({
     startNewItem(kind, parentDir)
   }
 
-  /** 上传文件夹：选本地目录，导入到当前目录 */
+  /** 上传文件夹：选本地目录，导入到当前目录；全过程给可见反馈 */
   const uploadFolder = async (directory: string) => {
-    const result = await importLocalFiles(
-      directory,
-      'notes',
-      { directory: true, accept: '' },
-      syncStaticAssets,
-    )
-    if (!result) return
-    await useNotesStore.getState().loadTree()
-    if (result.imported === 0) {
-      toast.message(t('files.more.nothingImported'))
-    } else if (result.skipped > 0) {
-      toast.success(t('files.more.importSkipped', { count: result.imported, skipped: result.skipped }))
-    } else {
-      toast.success(t('files.more.imported', { count: result.imported }))
+    if (importBusy) return
+    setImportBusy(true)
+    try {
+      const result = await importLocalFiles(
+        directory,
+        'notes',
+        { directory: true, accept: '' },
+        syncStaticAssets,
+        makeImportFeedback(t),
+      )
+      reportImportResult(t, result, useNotesStore.getState().applyLocalPaths)
+    } finally {
+      endImportFeedback()
+      setImportBusy(false)
     }
   }
 
@@ -392,7 +397,7 @@ function TreeRow({
       return
     }
     const count = await downloadRemotePaths(paths)
-    await useNotesStore.getState().loadTree()
+    useNotesStore.getState().applyLocalPaths(paths)
     toast.success(t('files.more.remoteDone', { count }))
   }
 
@@ -466,15 +471,29 @@ function TreeRow({
     }
   }
 
-  /** 上传单个 / 多个本地文件到该文件所在目录 */
+  /**
+   * 上传单个 / 多个本地文件到该文件所在目录
+   *
+   * 旧版是「选文件 → 串行转码 → 一次 RPC 写盘 → await loadTree() 全量重扫」
+   * 全程零提示，宿主里看起来就是「点了没反应 / 等很久」。现在改成：
+   * 点菜单立刻出 loading、读取与写入分阶段更新进度、写盘成功后只增量插树。
+   */
   const uploadFile = async () => {
-    const result = await importLocalFiles(parentDir, 'notes', {
-      multiple: true,
-      accept: '.md,.markdown,.txt',
-    })
-    if (!result) return
-    await useNotesStore.getState().loadTree()
-    toast.success(t('files.more.imported', { count: result.imported }))
+    if (importBusy) return
+    setImportBusy(true)
+    try {
+      const result = await importLocalFiles(
+        parentDir,
+        'notes',
+        { multiple: true, accept: '.md,.markdown,.txt' },
+        true,
+        makeImportFeedback(t),
+      )
+      reportImportResult(t, result, useNotesStore.getState().applyLocalPaths)
+    } finally {
+      endImportFeedback()
+      setImportBusy(false)
+    }
   }
 
   /** 模板子菜单（参考项目的「插件命令组」，两套菜单都有） */
