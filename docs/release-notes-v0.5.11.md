@@ -1,6 +1,7 @@
 # v0.5.11 发布说明（原生文件选择 / 刷新可见反馈）
 
-> **发布状态**：`dev` 分支实现，**未打 tag、未发 Release、未提商店候选 PR**。
+> **发布状态**：`dev` 已合并 `main`；v0.5.11 tag / Release 已发布，5 平台 CI 全绿；
+> 商店候选 PR #549 已提交，等待维护者 `/sign`。
 > 本版只解决用户反馈的一个体感问题：0.5.10 安装后「导入和上传都没有响应结果，
 > 刷新按钮点了也没有任何响应」。
 > 版本号统一为 `0.5.11`；部署与回滚见 `docs/版本部署变更说明-v0.5.11.md`。
@@ -90,8 +91,15 @@
 
 ## 6. 发布
 
-本版**暂不发布**。需要在用户确认后执行：打 tag / Release → 等 5 平台 CI →
-生成候选 → 提 DBX Store PR。当前商店候选仍是 v0.5.9 的 PR #507（等待维护者 `/sign`）。
+本版已发布到源码仓库：
+
+- Release：https://github.com/mjj3610/dbx-note/releases/tag/v0.5.11 （非 draft）；
+- CI：https://github.com/mjj3610/dbx-note/actions/runs/44283951775 — success，
+  5 平台包与 `release-candidates.json` 均来自该 Release；
+- 商店候选：https://github.com/t8y2/dbx-store/pull/549 — open，diff 仅
+  `candidates/com.mjj3610.note.json`，等待维护者 `/sign` 后合并上架；
+- 发布前复核：v0.5.9 候选 PR #507 已由维护者 `/sign` 并合并，本插件无其它 open 候选，
+  上游 `latestVersion` 为 0.5.9，因此没有关闭任何正在签名的候选。
 
 ## 7. 本地安装包与安装验证
 

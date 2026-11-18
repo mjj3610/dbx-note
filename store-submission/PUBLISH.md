@@ -371,3 +371,32 @@ Linux（X11 `XGetImage`、Wayland portal、`_NET_WM_STATE_ABOVE`、`XGrabKey`、
 
 签名命令 `/sign` 只有维护者 `t8y2` 本人评论才生效（`sign-command.yml` 里写死了
 `github.actor == 't8y2'`），作者侧无法触发，只能等。
+
+## v0.5.11：原生文件选择 / 刷新反馈（PR #549）
+
+| 项 | 状态 |
+| --- | --- |
+| 代码 | `dev` 快进合并到 `main`；本地 `e4aded4`，远端以 API 重建为 `bc3f83d`（32 个差异文件，0 删除） |
+| 版本号 | `manifest.json` / `package.json` / `package-lock.json` / `backend/Cargo.toml` / `backend/Cargo.lock` / `PLUGIN_VERSION` 均为 `0.5.11` |
+| 商店元数据 | `.dbx-store.json` 的 `source` 指向 `v0.5.11`，`releaseNotes` 补 0.5.10 / 0.5.11 |
+| 回归 | typecheck 0 错、build ✓、cargo test **28/0**、sidecar-check **216/0**、smoke **38/0**、e2e **351/0** |
+| preflight | 通过；修正 `PUBLISH.md` 里 `oauth2:token AT gitee.com` 的误报写法 |
+| Release | https://github.com/mjj3610/dbx-note/releases/tag/v0.5.11 （非 draft） |
+| 5 平台 CI | https://github.com/mjj3610/dbx-note/actions/runs/44283951775 — **success** |
+| 候选 JSON | 用 CI 的 `.tmp/release-candidates.json` 生成；校验仅报预期的 `awaiting DBX Store signing` |
+| 商店 PR | https://github.com/t8y2/dbx-store/pull/549 — open，diff 只有 `candidates/com.mjj3610.note.json`（+59 行） |
+| 下一步 | 等维护者 `/sign`；上游 `latestVersion` 目前仍为 0.5.9 |
+
+发布前复核：#507（v0.5.9）已于 2026-11-13 由维护者 `/sign` 并合并，本插件 open 候选 0 个，
+上游 `latestVersion=0.5.9`，因此没有关闭任何候选 PR。
+
+本机本轮写权限状况：
+
+- `git push` 连续遇到非快进 + `CONNECT tunnel failed 502`；
+- GitHub 连接器的写接口返回 `403 Resource not accessible by integration`，
+  重新授权后仍报 token 认证失败；
+- 最终按用户选择，用本机 git 凭据走 Git Data API：`.tmp/api-push-0511.mjs` 以远端 tree 为
+  `base_tree`，只覆盖 32 个差异 blob；`.tmp/release-api-0511.mjs` 以远端 main commit 为
+  tag 目标，创建 annotated tag 并发布 Release；商店 PR 用 skill 的 `gh-publish.mjs pr --dir .tmp/dbx-store-0511`。
+- 注意 `gh-publish.mjs pr` 必须带 `--dir <商店克隆目录>`，否则会在项目根找分支并报
+  `src refspec ... does not match any`；`--body-file` 也要传绝对路径。
